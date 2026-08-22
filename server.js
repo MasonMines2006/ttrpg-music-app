@@ -148,16 +148,7 @@ app.post('/api/preview', (req, res) => {
   });
 });
 
-app.post('/api/download', (req, res) => {
-  const { url } = req.body || {};
-  if (!url || !isAllowedUrl(url)) {
-    return res.status(400).json({ error: 'Please provide a valid YouTube or SoundCloud URL.' });
-  }
-
-  // Random id prefix avoids filename collisions between different downloads.
-  const id = crypto.randomBytes(6).toString('hex');
-  const outputTemplate = path.join(DOWNLOADS_DIR, `${id} - %(title)s.%(ext)s`);
-
+function runYtDlpDownload(url, outputTemplate, extraArgs, callback) {
   execFile('yt-dlp', [
     '-x', '--audio-format', 'mp3',
     '--no-playlist',
@@ -167,8 +158,23 @@ app.post('/api/download', (req, res) => {
     // separator string and corrupting the parse (a plain string join with a
     // hand-picked delimiter would have exactly that risk).
     '--print', 'after_move:%(.{thumbnail,filepath})j',
+    ...extraArgs,
     url
-  ], { timeout: 5 * 60 * 1000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+  ], { timeout: 5 * 60 * 1000, maxBuffer: 1024 * 1024 * 10 }, callback);
+}
+
+app.post('/api/download', (req, res) => {
+  const { url } = req.body || {};
+  if (!url || !isAllowedUrl(url)) {
+    return res.status(400).json({ error: 'Please provide a valid YouTube or SoundCloud URL.' });
+  }
+
+  // Random id prefix avoids filename collisions between different downloads.
+  const id = crypto.randomBytes(6).toString('hex');
+  const outputTemplate = path.join(DOWNLOADS_DIR, `${id} - %(title)s.%(ext)s`);
+  const isYoutube = /youtube\.com|youtu\.be/i.test(new URL(url).hostname);
+
+  const finish = (err, stdout, stderr) => {
     if (err) {
       console.error(stderr || err.message);
       return res.status(500).json({ error: 'Download failed. The link may be private, region-locked, or unsupported.' });
@@ -191,6 +197,20 @@ app.post('/api/download', (req, res) => {
       url: `/downloads/${encodeURIComponent(filename)}`,
       image: thumbnail || null
     });
+  };
+
+  runYtDlpDownload(url, outputTemplate, [], (err, stdout, stderr) => {
+    if (err && isYoutube) {
+      // YouTube periodically reshuffles which "client" yt-dlp's default
+      // format selection works with, and some videos 403 with whatever
+      // that default currently is. The "android" client (also used for
+      // previews) tends to still work when that happens, so it's worth
+      // one automatic retry before giving up.
+      console.error('Default download failed, retrying with the android client:', stderr || err.message);
+      runYtDlpDownload(url, outputTemplate, ['--extractor-args', 'youtube:player_client=android'], finish);
+    } else {
+      finish(err, stdout, stderr);
+    }
   });
 });
 
