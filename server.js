@@ -67,6 +67,16 @@ function isAllowedUrl(url) {
   }
 }
 
+// Picks a thumbnail that's big enough to look decent but not full
+// resolution — this is just for a small UI square, not a poster.
+function pickThumbnail(thumbnails) {
+  if (!Array.isArray(thumbnails) || !thumbnails.length) return null;
+  const sized = thumbnails.filter(t => t.url && t.width).sort((a, b) => a.width - b.width);
+  if (!sized.length) return thumbnails[thumbnails.length - 1].url || null;
+  const target = sized.find(t => t.width >= 100) || sized[sized.length - 1];
+  return target.url;
+}
+
 app.post('/api/search', (req, res) => {
   const { query, source } = req.body || {};
   if (!query || typeof query !== 'string' || !query.trim()) {
@@ -92,7 +102,8 @@ app.post('/api/search', (req, res) => {
           title: entry.title,
           duration: entry.duration || null,
           uploader: entry.uploader || entry.channel || '',
-          url: entry.webpage_url || entry.url
+          url: entry.webpage_url || entry.url,
+          image: pickThumbnail(entry.thumbnails)
         };
       } catch {
         return null;
@@ -151,21 +162,35 @@ app.post('/api/download', (req, res) => {
     '-x', '--audio-format', 'mp3',
     '--no-playlist',
     '--output', outputTemplate,
-    '--print', 'after_move:filepath',
+    // yt-dlp's JSON-dict print bundles both fields into one properly-escaped
+    // JSON object, so there's no risk of a title/thumbnail containing some
+    // separator string and corrupting the parse (a plain string join with a
+    // hand-picked delimiter would have exactly that risk).
+    '--print', 'after_move:%(.{thumbnail,filepath})j',
     url
   ], { timeout: 5 * 60 * 1000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
     if (err) {
       console.error(stderr || err.message);
       return res.status(500).json({ error: 'Download failed. The link may be private, region-locked, or unsupported.' });
     }
-    const filePath = stdout.trim().split('\n').filter(Boolean).pop();
-    if (!filePath) {
+    const line = stdout.trim().split('\n').filter(Boolean).pop();
+    if (!line) {
       return res.status(500).json({ error: 'Download finished but the file could not be located.' });
+    }
+    let thumbnail, filePath;
+    try {
+      ({ thumbnail, filepath: filePath } = JSON.parse(line));
+    } catch {
+      return res.status(500).json({ error: 'Download finished but the result could not be parsed.' });
     }
     const filename = path.basename(filePath);
     // Strip the leading "id - " prefix for a cleaner display name.
     const displayName = filename.replace(/^[0-9a-f]{12} - /, '').replace(/\.mp3$/, '');
-    res.json({ name: displayName, url: `/downloads/${encodeURIComponent(filename)}` });
+    res.json({
+      name: displayName,
+      url: `/downloads/${encodeURIComponent(filename)}`,
+      image: thumbnail || null
+    });
   });
 });
 

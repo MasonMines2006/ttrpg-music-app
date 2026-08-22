@@ -138,6 +138,22 @@
   .result-row .title { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .result-row .meta { color: #9a9aa5; font-size: 0.8rem; }
 
+  .thumb {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    background-color: #444450;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #6a6a78;
+  }
+  .thumb-lg { width: 44px; height: 44px; border-radius: 6px; font-size: 18px; }
+
   .track-row {
     display: flex;
     align-items: center;
@@ -149,8 +165,16 @@
     flex-wrap: wrap;
   }
   .track-row.active { background: #3d4a2a; outline: 1px solid #7fb84a; }
-  .track-row .track-name {
+  .track-row .track-main {
     flex: 1 1 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .track-row .track-name {
+    flex: 1;
+    min-width: 0;
     font-size: 0.85rem;
     white-space: nowrap;
     overflow: hidden;
@@ -299,6 +323,7 @@
 </aside>
 
 <footer class="player-bar">
+  <div id="nowPlayingArt" class="thumb thumb-lg">♪</div>
   <div class="now-playing" id="statusLine">Load a track to get started.</div>
   <div class="player-transport">
     <button id="prevBtn" disabled>&larr; Previous</button>
@@ -362,6 +387,33 @@ const prevBtn = document.getElementById('prevBtn');
 const nextBtn = document.getElementById('nextBtn');
 const statusLine = document.getElementById('statusLine');
 const queueListEl = document.getElementById('queueList');
+const nowPlayingArt = document.getElementById('nowPlayingArt');
+
+// Shared by every thumbnail spot (track list, search results, now-playing
+// bar) so the image-vs-placeholder fallback only has one implementation
+// to keep consistent. Thumbnails come from scraped yt-dlp/Spotify metadata,
+// not guaranteed free of stray quote characters, so any embedded quote is
+// escaped before going into the CSS url("...") string — otherwise it could
+// terminate the string early and leave the rest as invalid, unpredictable
+// CSS for that property.
+function applyThumbBackground(el, imageUrl) {
+  if (imageUrl) {
+    el.style.backgroundImage = `url("${imageUrl.replace(/"/g, '\\"')}")`;
+    el.textContent = '';
+  } else {
+    el.style.backgroundImage = '';
+    el.textContent = '♪';
+  }
+}
+function createThumb(imageUrl, extraClass = '') {
+  const thumb = document.createElement('div');
+  thumb.className = 'thumb' + (extraClass ? ' ' + extraClass : '');
+  applyThumbBackground(thumb, imageUrl);
+  return thumb;
+}
+function setNowPlayingArt(imageUrl) {
+  applyThumbBackground(nowPlayingArt, imageUrl);
+}
 
 // Every uploaded/downloaded song lives here as its own track record, so
 // the queue can hold sections from more than one song at a time.
@@ -445,13 +497,17 @@ function restoreTrackSelection(id) {
   seekBar.disabled = false;
   addMarkerBtn.disabled = false;
   renderTrackList();
+  setNowPlayingArt(track.image);
 
   if (track.type === 'spotify') {
     statusLine.textContent = `Loaded: ${track.name} (press Play to resume)`;
     waveform.style.display = 'none';
     visualizer.style.display = 'none';
     waveformHint.textContent = "Waveform and visualizer aren't available for Spotify tracks.";
+    spotifyState = { currentTime: 0, duration: track.duration, paused: true };
     seekBar.max = track.duration;
+    seekBar.value = 0;
+    currentTimeLabel.textContent = formatTime(0);
     durationLabel.textContent = formatTime(track.duration);
     renderSections();
   } else {
@@ -468,12 +524,13 @@ function restoreTrackSelection(id) {
 // Adding a track only switches playback to it when it's the very first
 // one — otherwise it just joins the library so you can queue it up
 // without interrupting whatever's already playing.
-function addTrackToLibrary(src, name) {
+function addTrackToLibrary(src, name, image = null) {
   const track = {
     id: crypto.randomUUID(),
     type: 'file',
     name,
     src,
+    image,
     duration: 0,
     markers: [],
     sectionNames: {},
@@ -485,12 +542,13 @@ function addTrackToLibrary(src, name) {
   else renderTrackList();
 }
 
-function addSpotifyTrackToLibrary(uri, name, artist, durationMs) {
+function addSpotifyTrackToLibrary(uri, name, artist, durationMs, image = null) {
   const track = {
     id: crypto.randomUUID(),
     type: 'spotify',
     name: `${name} — ${artist}`,
     spotifyUri: uri,
+    image,
     duration: durationMs / 1000,
     markers: [],
     sectionNames: {},
@@ -518,13 +576,19 @@ function playerPlay() {
   if (isSpotifyTrack(track)) {
     // A track restored from a saved library was never actually handed to
     // the Spotify device this session, so resume() would have nothing to
-    // resume — it needs to be (re-)started properly first.
+    // resume — it needs to be (re-)started properly first. Either way, the
+    // "play" event only fires once we know playback actually started —
+    // firing it optimistically would leave the Play/Pause button stuck on
+    // "Pause" if starting Spotify playback fails (not connected, device
+    // not ready yet, etc).
     if (!track._spotifyStarted) {
-      startSpotifyTrack(track).catch(err => { statusLine.textContent = err.message; });
+      startSpotifyTrack(track)
+        .then(() => playerEvents.dispatchEvent(new Event('play')))
+        .catch(err => { statusLine.textContent = err.message; });
     } else if (spotifyPlayerInstance) {
       spotifyPlayerInstance.resume();
+      playerEvents.dispatchEvent(new Event('play'));
     }
-    playerEvents.dispatchEvent(new Event('play'));
   } else {
     audio.play();
   }
@@ -579,12 +643,19 @@ function switchToTrack(id, jumpToSectionIndex = null) {
   addMarkerBtn.disabled = false;
   statusLine.textContent = `Loaded: ${track.name}`;
   renderTrackList();
+  setNowPlayingArt(track.image);
 
   if (track.type === 'spotify') {
     waveform.style.display = 'none';
     visualizer.style.display = 'none';
     waveformHint.textContent = "Waveform and visualizer aren't available for Spotify tracks.";
+    // Reset playback state up front — otherwise the previous Spotify
+    // track's position/duration would still show until the first poll
+    // tick of the new one lands.
+    spotifyState = { currentTime: 0, duration: track.duration, paused: true };
     seekBar.max = track.duration;
+    seekBar.value = 0;
+    currentTimeLabel.textContent = formatTime(0);
     durationLabel.textContent = formatTime(track.duration);
     startSpotifyTrack(track)
       .then(() => {
@@ -624,6 +695,7 @@ function removeTrack(id) {
       seekBar.disabled = true;
       addMarkerBtn.disabled = true;
       statusLine.textContent = 'Load a track to get started.';
+      setNowPlayingArt(null);
       waveform.style.display = '';
       visualizer.style.display = '';
       waveformHint.textContent = '';
@@ -645,10 +717,14 @@ function renderTrackList() {
     const row = document.createElement('div');
     row.className = 'track-row' + (track.id === currentTrackId ? ' active' : '');
 
+    const main = document.createElement('div');
+    main.className = 'track-main';
+    main.appendChild(createThumb(track.image));
     const name = document.createElement('span');
     name.className = 'track-name';
     name.textContent = track.name;
-    row.appendChild(name);
+    main.appendChild(name);
+    row.appendChild(main);
 
     const queueBtn = document.createElement('button');
     queueBtn.textContent = '+ Queue';
@@ -860,7 +936,7 @@ function hideLoading() {
   loadingOverlay.classList.add('hidden');
 }
 
-async function downloadFromUrl(url) {
+async function downloadFromUrl(url, fallbackImage = null) {
   previewAudio.pause();
   resetPreviewButton();
   importBtn.disabled = true;
@@ -877,7 +953,7 @@ async function downloadFromUrl(url) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Download failed.');
 
-    addTrackToLibrary(data.url, data.name);
+    addTrackToLibrary(data.url, data.name, data.image || fallbackImage);
     importStatus.textContent = `Imported: ${data.name}`;
     importUrl.value = '';
   } catch (err) {
@@ -970,6 +1046,7 @@ async function runSearch(query) {
     data.results.forEach(result => {
       const row = document.createElement('div');
       row.className = 'result-row';
+      row.appendChild(createThumb(result.image));
 
       const info = document.createElement('div');
       info.className = 'info';
@@ -988,7 +1065,7 @@ async function runSearch(query) {
 
       const useBtn = document.createElement('button');
       useBtn.textContent = 'Download';
-      useBtn.addEventListener('click', () => downloadFromUrl(result.url));
+      useBtn.addEventListener('click', () => downloadFromUrl(result.url, result.image));
 
       row.appendChild(info);
       row.appendChild(previewBtn);
@@ -1014,10 +1091,19 @@ function extractSpotifyId(text, kind) {
   return null;
 }
 
+function spotifyImageFor(item) {
+  const images = item.album && item.album.images;
+  if (!Array.isArray(images) || !images.length) return null;
+  // Spotify orders an album's images largest-first, so the last one is
+  // the smallest — plenty for a small UI thumbnail.
+  return images[images.length - 1].url;
+}
+
 function renderSpotifyItemRow(item, onAdd) {
   const artists = item.artists.map(a => a.name).join(', ');
   const row = document.createElement('div');
   row.className = 'result-row';
+  row.appendChild(createThumb(spotifyImageFor(item)));
 
   const info = document.createElement('div');
   info.className = 'info';
@@ -1053,7 +1139,7 @@ async function addSpotifyTrackById(trackId) {
     const item = await res.json();
     if (!res.ok) throw new Error((item.error && item.error.message) || 'Could not load this track.');
     const artists = item.artists.map(a => a.name).join(', ');
-    addSpotifyTrackToLibrary(item.uri, item.name, artists, item.duration_ms);
+    addSpotifyTrackToLibrary(item.uri, item.name, artists, item.duration_ms, spotifyImageFor(item));
     importStatus.textContent = `Added: ${item.name}`;
     importUrl.value = '';
   } catch (err) {
@@ -1095,7 +1181,7 @@ async function importSpotifyPlaylist(playlistId) {
     addAllBtn.addEventListener('click', () => {
       items.forEach(item => {
         const artists = item.artists.map(a => a.name).join(', ');
-        addSpotifyTrackToLibrary(item.uri, item.name, artists, item.duration_ms);
+        addSpotifyTrackToLibrary(item.uri, item.name, artists, item.duration_ms, spotifyImageFor(item));
       });
       addAllBtn.textContent = 'Added!';
       addAllBtn.disabled = true;
@@ -1104,7 +1190,7 @@ async function importSpotifyPlaylist(playlistId) {
 
     items.forEach(item => {
       resultList.appendChild(renderSpotifyItemRow(item, (i, artists) =>
-        addSpotifyTrackToLibrary(i.uri, i.name, artists, i.duration_ms)
+        addSpotifyTrackToLibrary(i.uri, i.name, artists, i.duration_ms, spotifyImageFor(i))
       ));
     });
   } catch (err) {
@@ -1471,7 +1557,7 @@ async function runSpotifySearch(query) {
     importStatus.textContent = `Found ${items.length} result(s) — click one to add it.`;
     items.forEach(item => {
       resultList.appendChild(renderSpotifyItemRow(item, (i, artists) =>
-        addSpotifyTrackToLibrary(i.uri, i.name, artists, i.duration_ms)
+        addSpotifyTrackToLibrary(i.uri, i.name, artists, i.duration_ms, spotifyImageFor(i))
       ));
     });
   } catch (err) {
@@ -1504,6 +1590,18 @@ playPauseBtn.addEventListener('click', () => {
 });
 playerEvents.addEventListener('play', () => { playPauseBtn.textContent = 'Pause'; });
 playerEvents.addEventListener('pause', () => { playPauseBtn.textContent = 'Play'; });
+
+// Spacebar toggles play/pause, like most media players — but not while
+// typing in a text field (renaming a section, typing a search query, etc.),
+// where a space should just be a space.
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space') return;
+  const active = document.activeElement;
+  const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+  if (isTyping || playPauseBtn.disabled) return;
+  e.preventDefault(); // stop the page from scrolling
+  playPauseBtn.click();
+});
 
 // ----- Seek bar + the core section loop/stop logic -----
 // Driven by playerEvents so the same code works for a local <audio>
