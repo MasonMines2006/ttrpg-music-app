@@ -205,13 +205,15 @@
     background: #1e1e24;
   }
 
-  #waveform {
-    display: block;
-    width: 100%;
-    height: 100px;
+  .waveform-wrap {
+    overflow-x: auto;
     margin-top: 12px;
     border-radius: 6px;
     background: #1e1e24;
+  }
+  #waveform {
+    display: block;
+    height: 100px;
     cursor: pointer;
   }
 
@@ -306,7 +308,16 @@
       <button id="addMarkerBtn" disabled>+ Add Marker Here</button>
       <span class="hint">Splits the track into a new section at the current playback time.</span>
     </div>
-    <canvas id="waveform" title="Loudness across the whole track — click to jump there."></canvas>
+    <div class="transport">
+      <button id="zoomOutBtn" title="Zoom out">&minus;</button>
+      <span class="hint" id="zoomLabel">1&times;</span>
+      <button id="zoomInBtn" title="Zoom in">+</button>
+      <button id="zoomResetBtn">Reset zoom</button>
+      <span class="hint">Zoom in for precise cuts, then scroll to pan.</span>
+    </div>
+    <div class="waveform-wrap" id="waveformWrap">
+      <canvas id="waveform" title="Loudness across the whole track — click to jump there."></canvas>
+    </div>
     <p class="hint" id="waveformHint"></p>
     <canvas id="visualizer"></canvas>
   </div>
@@ -362,7 +373,14 @@ const sourceYoutube = document.getElementById('sourceYoutube');
 const sourceSoundcloud = document.getElementById('sourceSoundcloud');
 const trackListEl = document.getElementById('trackList');
 const waveform = document.getElementById('waveform');
+const waveformWrap = document.getElementById('waveformWrap');
 const waveformHint = document.getElementById('waveformHint');
+const zoomInBtn = document.getElementById('zoomInBtn');
+const zoomOutBtn = document.getElementById('zoomOutBtn');
+const zoomResetBtn = document.getElementById('zoomResetBtn');
+const zoomLabel = document.getElementById('zoomLabel');
+let waveformZoom = 1;
+const MAX_WAVEFORM_ZOOM = 128;
 const sourceSpotify = document.getElementById('sourceSpotify');
 const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
 const spotifyStatus = document.getElementById('spotifyStatus');
@@ -1239,6 +1257,7 @@ const waveformCtx = waveform.getContext('2d');
 
 async function loadWaveform(track) {
   track.peaks = null;
+  setWaveformZoom(1); // fresh view for a newly-selected track
   waveformHint.textContent = 'Generating waveform…';
   drawWaveform();
   try {
@@ -1262,8 +1281,23 @@ async function loadWaveform(track) {
   }
 }
 
+// Zoom widens the actual canvas (rather than redrawing a windowed slice)
+// and relies on the wrapping div's native horizontal scrollbar for
+// panning — the simplest way to get real "zoom into a region" precision,
+// since the same peaks array just gets spread across more pixels.
+function setWaveformZoom(newZoom) {
+  waveformZoom = Math.min(MAX_WAVEFORM_ZOOM, Math.max(1, newZoom));
+  zoomLabel.textContent = `${waveformZoom}×`;
+  drawWaveform();
+}
+zoomInBtn.addEventListener('click', () => setWaveformZoom(waveformZoom * 2));
+zoomOutBtn.addEventListener('click', () => setWaveformZoom(waveformZoom / 2));
+zoomResetBtn.addEventListener('click', () => setWaveformZoom(1));
+
 function drawWaveform() {
-  waveform.width = waveform.clientWidth;
+  const width = Math.max(1, Math.round(waveformWrap.clientWidth * waveformZoom));
+  waveform.width = width;
+  waveform.style.width = width + 'px';
   waveform.height = waveform.clientHeight;
   const w = waveform.width, h = waveform.height, mid = h / 2;
   waveformCtx.clearRect(0, 0, w, h);
@@ -1301,6 +1335,16 @@ function drawWaveform() {
     waveformCtx.moveTo(px, 0);
     waveformCtx.lineTo(px, h);
     waveformCtx.stroke();
+
+    // Keep the playhead in view while zoomed in and playing, instead of
+    // it scrolling off the visible (panned) region.
+    if (waveformZoom > 1) {
+      const viewLeft = waveformWrap.scrollLeft;
+      const viewRight = viewLeft + waveformWrap.clientWidth;
+      if (px < viewLeft || px > viewRight) {
+        waveformWrap.scrollLeft = px - waveformWrap.clientWidth / 2;
+      }
+    }
   }
 }
 
@@ -1691,6 +1735,8 @@ nextBtn.addEventListener('click', () => {
   }
 });
 prevBtn.addEventListener('click', () => goToSection(activeSectionIndex - 1));
+
+window.addEventListener('resize', () => drawWaveform());
 
 renderTrackList();
 renderSpotifyStatus();

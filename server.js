@@ -18,7 +18,10 @@ if (!fs.existsSync(DOWNLOADS_DIR)) fs.mkdirSync(DOWNLOADS_DIR);
 if (!fs.existsSync(PREVIEWS_DIR)) fs.mkdirSync(PREVIEWS_DIR);
 if (!fs.existsSync(WAVEFORMS_DIR)) fs.mkdirSync(WAVEFORMS_DIR);
 
-const WAVEFORM_BUCKETS = 1200; // resolution of the waveform overview
+// High enough resolution to zoom into for precise cuts (like Audacity) —
+// bumping this only costs a bit more JSON payload/compute, both trivial
+// locally, since decode time dominates and doesn't depend on bucket count.
+const WAVEFORM_BUCKETS = 20000;
 const WAVEFORM_SAMPLE_RATE = 4000; // low rate: plenty of detail for an overview, keeps decode fast
 
 // The track library (names, markers, sections, queue) is saved here so it
@@ -264,7 +267,9 @@ app.post('/api/waveform', (req, res) => {
     return res.status(400).json({ error: 'Unknown track.' });
   }
 
-  const cacheKey = crypto.createHash('sha1').update(sourcePath).digest('hex');
+  // Bucket count is part of the cache key so bumping WAVEFORM_BUCKETS in
+  // the future invalidates old lower-resolution caches automatically.
+  const cacheKey = crypto.createHash('sha1').update(`${sourcePath}:${WAVEFORM_BUCKETS}`).digest('hex');
   const cachedPath = path.join(WAVEFORMS_DIR, `${cacheKey}.json`);
 
   if (fs.existsSync(cachedPath)) {
