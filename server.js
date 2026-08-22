@@ -5,7 +5,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const { execFile, exec } = require('child_process');
 const multer = require('multer');
 
 const app = express();
@@ -286,6 +286,20 @@ app.post('/api/library', (req, res) => {
   res.json({ ok: true });
 });
 
+// Opens the app in the default browser. 127.0.0.1 (not "localhost") matters
+// here — it's the exact origin Spotify's login redirect is registered for.
+function openBrowser(url) {
+  const platform = process.platform;
+  const cmd = platform === 'darwin' ? `open "${url}"`
+    : platform === 'win32' ? `start "" "${url}"`
+    : `xdg-open "${url}"`;
+  exec(cmd, (err) => {
+    if (err) console.log(`Could not auto-open a browser — open ${url} manually.`);
+  });
+}
+
 app.listen(PORT, () => {
-  console.log(`TTRPG Music App running at http://localhost:${PORT}`);
+  const url = `http://127.0.0.1:${PORT}`;
+  console.log(`TTRPG Music App running at ${url}`);
+  openBrowser(url);
 });
