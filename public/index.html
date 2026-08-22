@@ -1591,16 +1591,35 @@ playPauseBtn.addEventListener('click', () => {
 playerEvents.addEventListener('play', () => { playPauseBtn.textContent = 'Pause'; });
 playerEvents.addEventListener('pause', () => { playPauseBtn.textContent = 'Play'; });
 
-// Spacebar toggles play/pause, like most media players — but not while
-// typing in a text field (renaming a section, typing a search query, etc.),
-// where a space should just be a space.
+// Keyboard shortcuts — ignored while typing in a text field (renaming a
+// section, typing a search query, etc.), where these keys should just do
+// their normal text-editing thing.
+// - Space: toggle play/pause, like most media players.
+// - Left/Right: seek. A small nudge while paused (for lining a marker up
+//   precisely) or a bigger skip while playing (for scrubbing through a
+//   section quickly) — the same paused-vs-playing step size Audacity uses.
+const SEEK_STEP_PAUSED = 1;
+const SEEK_STEP_PLAYING = 5;
+
 document.addEventListener('keydown', (e) => {
-  if (e.code !== 'Space') return;
   const active = document.activeElement;
   const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
   if (isTyping || playPauseBtn.disabled) return;
-  e.preventDefault(); // stop the page from scrolling
-  playPauseBtn.click();
+
+  if (e.code === 'Space') {
+    e.preventDefault(); // stop the page from scrolling
+    playPauseBtn.click();
+  } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+    e.preventDefault();
+    const step = playerIsPaused() ? SEEK_STEP_PAUSED : SEEK_STEP_PLAYING;
+    const delta = e.code === 'ArrowRight' ? step : -step;
+    const duration = playerGetDuration();
+    // Duration can be 0/NaN for a moment right after switching tracks,
+    // before metadata has loaded — don't let that clamp every forward
+    // seek to 0 in the meantime.
+    const maxTime = Number.isFinite(duration) && duration > 0 ? duration : Infinity;
+    playerSeek(Math.min(Math.max(playerGetCurrentTime() + delta, 0), maxTime));
+  }
 });
 
 // ----- Seek bar + the core section loop/stop logic -----
@@ -1655,12 +1674,19 @@ addMarkerBtn.addEventListener('click', () => {
 
 // ----- Next / Previous section -----
 nextBtn.addEventListener('click', () => {
-  // A queued section takes priority over just moving to the next one in order.
-  if (sectionQueue.length > 0) {
-    const item = sectionQueue.shift();
+  const sections = getSections();
+  const hasNaturalNext = activeSectionIndex < sections.length - 1;
+  const nextQueued = sectionQueue[0];
+  // A queued jump within the CURRENT track is a deliberate reorder, so it
+  // always takes priority. A queued track further down the queue should
+  // NOT cut off the sections you've already cut in this one, though — it
+  // only kicks in once you've actually reached the end of this track's
+  // own sections.
+  if (nextQueued && (nextQueued.trackId === currentTrackId || !hasNaturalNext)) {
+    sectionQueue.shift();
     renderQueue();
-    goToQueueItem(item);
-  } else {
+    goToQueueItem(nextQueued);
+  } else if (hasNaturalNext) {
     goToSection(activeSectionIndex + 1);
   }
 });
