@@ -1,0 +1,13 @@
+{
+  "name": "ttrpg-music-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Loop soundtrack sections for tabletop games, with YouTube/SoundCloud import.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.2.0"
+  }
+}

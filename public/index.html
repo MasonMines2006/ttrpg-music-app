@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TTRPG Music App</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 700px;
+    margin: 40px auto;
+    padding: 0 16px;
+    background: #1e1e24;
+    color: #e8e8ec;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  p.subtitle { color: #9a9aa5; margin-top: 0; }
+
+  .card {
+    background: #2a2a33;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  input[type="file"] { color: #e8e8ec; }
+  input[type="url"] {
+    flex: 1;
+    background: #1e1e24;
+    border: 1px solid #444450;
+    border-radius: 6px;
+    color: #e8e8ec;
+    padding: 8px 10px;
+    font-size: 0.95rem;
+  }
+
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  button {
+    background: #3d3d4a;
+    color: #e8e8ec;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+  button:hover { background: #4a4a5a; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  button.primary { background: #5865f2; }
+  button.primary:hover { background: #6b76f5; }
+
+  input[type="range"] { flex: 1; }
+
+  .time { font-variant-numeric: tabular-nums; min-width: 90px; text-align: center; }
+
+  .section-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: #33333e;
+  }
+  .section-row.active {
+    background: #3d4a2a;
+    outline: 1px solid #7fb84a;
+  }
+  .section-row input[type="text"] {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #e8e8ec;
+    font-size: 0.95rem;
+  }
+  .section-row input[type="text"]:focus { outline: 1px solid #5865f2; }
+  .section-row .range { color: #9a9aa5; font-size: 0.85rem; min-width: 100px; }
+  .section-row .remove { background: none; color: #c96; padding: 2px 8px; }
+
+  .big-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .big-controls button { flex: 1; padding: 14px; font-size: 1.05rem; }
+
+  .hint { color: #9a9aa5; font-size: 0.85rem; margin-top: 6px; }
+  .divider { color: #66666f; text-align: center; margin: 12px 0; font-size: 0.85rem; }
+  .error { color: #e07a7a; font-size: 0.85rem; margin-top: 6px; }
+
+  .source-toggle { display: flex; gap: 6px; }
+  .source-toggle button { background: #1e1e24; border: 1px solid #444450; }
+  .source-toggle button.selected { background: #5865f2; border-color: #5865f2; }
+
+  .result-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: #33333e;
+  }
+  .result-row .info { flex: 1; min-width: 0; }
+  .result-row .title { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result-row .meta { color: #9a9aa5; font-size: 0.8rem; }
+
+  .track-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: #33333e;
+  }
+  .track-row.active { background: #3d4a2a; outline: 1px solid #7fb84a; }
+  .track-row .track-name { flex: 1; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .stop-toggle.stop-active { background: #5a3232; }
+
+  .queue-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #33333e;
+    border-radius: 999px;
+    padding: 4px 6px 4px 12px;
+    margin: 0 6px 6px 0;
+    font-size: 0.85rem;
+  }
+  .queue-chip .remove { background: none; padding: 2px 6px; color: #c96; }
+  #queueList { margin-top: 10px; }
+
+  #visualizer {
+    display: block;
+    width: 100%;
+    height: 80px;
+    margin-top: 12px;
+    border-radius: 6px;
+    background: #1e1e24;
+  }
+
+  #waveform {
+    display: block;
+    width: 100%;
+    height: 100px;
+    margin-top: 12px;
+    border-radius: 6px;
+    background: #1e1e24;
+    cursor: pointer;
+  }
+
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 20, 24, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    z-index: 100;
+  }
+  .loading-overlay.hidden { display: none; }
+  .spinner {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 5px solid #444450;
+    border-top-color: #5865f2;
+    animation: spin 0.9s linear infinite;
+  }
+  #loadingText { color: #e8e8ec; font-size: 1rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<h1>TTRPG Music App</h1>
+<p class="subtitle">Loop one section forever. Click "Next Section" the instant you finish describing it.</p>
+
+<div class="card">
+  <div class="transport">
+    <input type="url" id="importUrl" placeholder="Paste a link, or type a song name to search">
+    <div class="source-toggle">
+      <button id="sourceYoutube" class="selected">YouTube</button>
+      <button id="sourceSoundcloud">SoundCloud</button>
+      <button id="sourceSpotify">Spotify</button>
+    </div>
+    <button id="importBtn">Go</button>
+  </div>
+  <p class="hint" id="importStatus">Downloads audio only, to this computer, for your own use.</p>
+  <div id="resultList"></div>
+
+  <div class="divider">— or —</div>
+
+  <input type="file" id="fileInput" accept="audio/*">
+</div>
+
+<div class="card">
+  <div class="transport">
+    <span class="hint" id="spotifyStatus" style="flex:1;">Not connected to Spotify.</span>
+    <button id="spotifyConnectBtn">Connect Spotify</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="font-size:1.05rem; margin-top:0;">Your Tracks</h2>
+  <div id="trackList"></div>
+</div>
+
+<div class="card">
+  <div class="transport">
+    <button id="playPauseBtn" disabled>Play</button>
+    <span class="time" id="currentTimeLabel">0:00</span>
+    <input type="range" id="seekBar" min="0" max="0" step="0.01" value="0" disabled>
+    <span class="time" id="durationLabel">0:00</span>
+  </div>
+  <div class="transport">
+    <button id="addMarkerBtn" disabled>+ Add Marker Here</button>
+    <span class="hint">Splits the track into a new section at the current playback time.</span>
+  </div>
+  <canvas id="waveform" title="Loudness across the whole track — click to jump there."></canvas>
+  <p class="hint" id="waveformHint"></p>
+  <canvas id="visualizer"></canvas>
+</div>
+
+<div class="card">
+  <h2 style="font-size:1.05rem; margin-top:0;">Sections</h2>
+  <div id="sectionList"></div>
+</div>
+
+<div class="card">
+  <div id="queueList"></div>
+  <div class="big-controls">
+    <button id="prevBtn" disabled>&larr; Previous Section</button>
+    <button id="nextBtn" class="primary" disabled>Next Section &rarr;</button>
+  </div>
+  <p class="hint" id="statusLine">Load a track to get started.</p>
+</div>
+
+<audio id="audio"></audio>
+<audio id="previewAudio"></audio>
+
+<div id="loadingOverlay" class="loading-overlay hidden">
+  <div class="spinner"></div>
+  <p id="loadingText">Downloading…</p>
+</div>
+
+<script>
+// ----- Grab all the elements we'll need up front -----
+const audio = document.getElementById('audio');
+const fileInput = document.getElementById('fileInput');
+const importUrl = document.getElementById('importUrl');
+const importBtn = document.getElementById('importBtn');
+const importStatus = document.getElementById('importStatus');
+const resultList = document.getElementById('resultList');
+const previewAudio = document.getElementById('previewAudio');
+let activePreviewBtn = null;
+const loadingOverlay = document.getElementById('loadingOverlay');
+const loadingText = document.getElementById('loadingText');
+const visualizer = document.getElementById('visualizer');
+const sourceYoutube = document.getElementById('sourceYoutube');
+const sourceSoundcloud = document.getElementById('sourceSoundcloud');
+const trackListEl = document.getElementById('trackList');
+const waveform = document.getElementById('waveform');
+const waveformHint = document.getElementById('waveformHint');
+const sourceSpotify = document.getElementById('sourceSpotify');
+const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
+const spotifyStatus = document.getElementById('spotifyStatus');
+
+let searchSource = 'youtube';
+sourceYoutube.addEventListener('click', () => setSource('youtube'));
+sourceSoundcloud.addEventListener('click', () => setSource('soundcloud'));
+sourceSpotify.addEventListener('click', () => setSource('spotify'));
+function setSource(source) {
+  searchSource = source;
+  sourceYoutube.classList.toggle('selected', source === 'youtube');
+  sourceSoundcloud.classList.toggle('selected', source === 'soundcloud');
+  sourceSpotify.classList.toggle('selected', source === 'spotify');
+}
+const playPauseBtn = document.getElementById('playPauseBtn');
+const seekBar = document.getElementById('seekBar');
+const currentTimeLabel = document.getElementById('currentTimeLabel');
+const durationLabel = document.getElementById('durationLabel');
+const addMarkerBtn = document.getElementById('addMarkerBtn');
+const sectionListEl = document.getElementById('sectionList');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const statusLine = document.getElementById('statusLine');
+const queueListEl = document.getElementById('queueList');
+
+// Every uploaded/downloaded song lives here as its own track record, so
+// the queue can hold sections from more than one song at a time.
+// { id, name, src, duration, markers: [seconds], sectionNames: {idx: name}, stopSections: {idx: true} }
+let tracks = [];
+let currentTrackId = null;
+let activeSectionIndex = 0;
+let pendingSectionIndex = null; // section to jump to once a newly-switched track's metadata loads
+let isSeekingByUser = false;
+let sectionQueue = []; // { trackId, sectionIndex } entries, in play order
+
+function formatTime(seconds) {
+  if (!isFinite(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function getCurrentTrack() {
+  return tracks.find(t => t.id === currentTrackId) || null;
+}
+
+// Turn a track's flat marker list into [{start, end}, ...] sections
+// covering the whole track (0 to duration).
+function getSections() {
+  const track = getCurrentTrack();
+  if (!track) return [];
+  const bounds = [0, ...track.markers.slice().sort((a, b) => a - b), track.duration || 0];
+  const sections = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    sections.push({ start: bounds[i], end: bounds[i + 1] });
+  }
+  return sections;
+}
+
+function addTrackToLibrary(src, name) {
+  const track = {
+    id: crypto.randomUUID(),
+    type: 'file',
+    name,
+    src,
+    duration: 0,
+    markers: [],
+    sectionNames: {},
+    stopSections: {}
+  };
+  tracks.push(track);
+  switchToTrack(track.id);
+}
+
+function addSpotifyTrackToLibrary(uri, name, artist, durationMs) {
+  const track = {
+    id: crypto.randomUUID(),
+    type: 'spotify',
+    name: `${name} — ${artist}`,
+    spotifyUri: uri,
+    duration: durationMs / 1000,
+    markers: [],
+    sectionNames: {},
+    stopSections: {}
+  };
+  tracks.push(track);
+  switchToTrack(track.id);
+}
+
+// ----- Unified player interface -----
+// Sections/queue/stop-marker logic all drives playback through these
+// functions instead of touching <audio> or the Spotify SDK directly, so
+// the same code works whether the current track is a local/downloaded
+// file or a Spotify stream. Both backends dispatch onto this shared
+// event target instead of their own native events.
+const playerEvents = new EventTarget();
+
+function isSpotifyTrack(track) {
+  return !!track && track.type === 'spotify';
+}
+function playerPlay() {
+  if (isSpotifyTrack(getCurrentTrack())) {
+    if (spotifyPlayerInstance) spotifyPlayerInstance.resume();
+    playerEvents.dispatchEvent(new Event('play'));
+  } else {
+    audio.play();
+  }
+}
+function playerPause() {
+  if (isSpotifyTrack(getCurrentTrack())) {
+    if (spotifyPlayerInstance) spotifyPlayerInstance.pause();
+    playerEvents.dispatchEvent(new Event('pause'));
+  } else {
+    audio.pause();
+  }
+}
+function playerSeek(seconds) {
+  if (isSpotifyTrack(getCurrentTrack())) {
+    spotifyState.currentTime = seconds; // optimistic; corrected by the next poll
+    if (spotifyPlayerInstance) spotifyPlayerInstance.seek(Math.round(seconds * 1000));
+  } else {
+    audio.currentTime = seconds;
+  }
+}
+function playerGetCurrentTime() {
+  return isSpotifyTrack(getCurrentTrack()) ? spotifyState.currentTime : audio.currentTime;
+}
+function playerGetDuration() {
+  const track = getCurrentTrack();
+  return isSpotifyTrack(track) ? (track.duration || spotifyState.duration) : audio.duration;
+}
+function playerIsPaused() {
+  return isSpotifyTrack(getCurrentTrack()) ? spotifyState.paused : audio.paused;
+}
+audio.addEventListener('play', () => playerEvents.dispatchEvent(new Event('play')));
+audio.addEventListener('pause', () => playerEvents.dispatchEvent(new Event('pause')));
+audio.addEventListener('timeupdate', () => playerEvents.dispatchEvent(new Event('timeupdate')));
+
+// Switches which track is loaded into the player. If jumpToSectionIndex
+// is given, playback jumps there (and starts) as soon as the new track's
+// metadata is ready — used when a queued item belongs to another song.
+function switchToTrack(id, jumpToSectionIndex = null) {
+  const track = tracks.find(t => t.id === id);
+  if (!track) return;
+
+  // Stop whichever backend was previously active so two tracks can't play at once.
+  audio.pause();
+  stopSpotifyPolling();
+  if (spotifyPlayerInstance) spotifyPlayerInstance.pause();
+
+  currentTrackId = id;
+  activeSectionIndex = 0;
+  pendingSectionIndex = jumpToSectionIndex;
+  playPauseBtn.disabled = false;
+  seekBar.disabled = false;
+  addMarkerBtn.disabled = false;
+  statusLine.textContent = `Loaded: ${track.name}`;
+  renderTrackList();
+
+  if (track.type === 'spotify') {
+    waveform.style.display = 'none';
+    visualizer.style.display = 'none';
+    waveformHint.textContent = "Waveform and visualizer aren't available for Spotify tracks.";
+    seekBar.max = track.duration;
+    durationLabel.textContent = formatTime(track.duration);
+    startSpotifyTrack(track)
+      .then(() => {
+        if (pendingSectionIndex !== null) {
+          const idx = pendingSectionIndex;
+          pendingSectionIndex = null;
+          goToSection(idx);
+        } else {
+          renderSections();
+        }
+      })
+      .catch(err => { statusLine.textContent = err.message; });
+  } else {
+    waveform.style.display = '';
+    visualizer.style.display = '';
+    waveformHint.textContent = '';
+    audio.src = track.src;
+    renderSections();
+    loadWaveform(track);
+  }
+}
+
+function removeTrack(id) {
+  tracks = tracks.filter(t => t.id !== id);
+  sectionQueue = sectionQueue.filter(item => item.trackId !== id);
+  if (currentTrackId === id) {
+    if (tracks.length > 0) {
+      switchToTrack(tracks[0].id);
+    } else {
+      currentTrackId = null;
+      audio.removeAttribute('src');
+      audio.load();
+      stopSpotifyPolling();
+      if (spotifyPlayerInstance) spotifyPlayerInstance.pause();
+      activeSectionIndex = 0;
+      playPauseBtn.disabled = true;
+      seekBar.disabled = true;
+      addMarkerBtn.disabled = true;
+      statusLine.textContent = 'Load a track to get started.';
+      waveform.style.display = '';
+      visualizer.style.display = '';
+      waveformHint.textContent = '';
+      renderSections();
+      drawWaveform();
+    }
+  }
+  renderQueue();
+  renderTrackList();
+}
+
+function renderTrackList() {
+  trackListEl.innerHTML = '';
+  if (tracks.length === 0) {
+    trackListEl.innerHTML = '<p class="hint">No tracks loaded yet — search, paste a link, or upload a file above.</p>';
+    return;
+  }
+  tracks.forEach(track => {
+    const row = document.createElement('div');
+    row.className = 'track-row' + (track.id === currentTrackId ? ' active' : '');
+
+    const name = document.createElement('span');
+    name.className = 'track-name';
+    name.textContent = track.name;
+    row.appendChild(name);
+
+    const switchBtn = document.createElement('button');
+    switchBtn.textContent = track.id === currentTrackId ? 'Current' : 'Switch to this';
+    switchBtn.disabled = track.id === currentTrackId;
+    switchBtn.addEventListener('click', () => switchToTrack(track.id));
+    row.appendChild(switchBtn);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'remove';
+    removeBtn.textContent = '✕';
+    removeBtn.title = 'Remove this track';
+    removeBtn.addEventListener('click', () => removeTrack(track.id));
+    row.appendChild(removeBtn);
+
+    trackListEl.appendChild(row);
+  });
+}
+
+function renderSections() {
+  const track = getCurrentTrack();
+  const sections = getSections();
+  sectionListEl.innerHTML = '';
+
+  sections.forEach((sec, i) => {
+    const row = document.createElement('div');
+    row.className = 'section-row' + (i === activeSectionIndex ? ' active' : '');
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = track.sectionNames[i] || `Section ${i + 1}`;
+    nameInput.addEventListener('input', () => {
+      track.sectionNames[i] = nameInput.value;
+      renderQueue();
+    });
+
+    const range = document.createElement('span');
+    range.className = 'range';
+    range.textContent = `${formatTime(sec.start)} – ${formatTime(sec.end)}`;
+
+    const jumpBtn = document.createElement('button');
+    jumpBtn.textContent = 'Loop this';
+    jumpBtn.addEventListener('click', () => goToSection(i));
+
+    const stopToggleBtn = document.createElement('button');
+    stopToggleBtn.className = 'stop-toggle';
+    function renderStopToggle() {
+      const isStop = !!track.stopSections[i];
+      stopToggleBtn.textContent = isStop ? '⏹ Stops here' : '🔁 Loops';
+      stopToggleBtn.title = isStop
+        ? 'Click to loop this section instead of stopping'
+        : 'Click to stop here instead of looping';
+      stopToggleBtn.classList.toggle('stop-active', isStop);
+    }
+    renderStopToggle();
+    stopToggleBtn.addEventListener('click', () => {
+      track.stopSections[i] = !track.stopSections[i];
+      renderStopToggle();
+    });
+
+    const queueBtn = document.createElement('button');
+    queueBtn.textContent = '+ Queue';
+    queueBtn.title = 'Add to the "up next" queue';
+    queueBtn.addEventListener('click', () => {
+      sectionQueue.push({ trackId: track.id, sectionIndex: i });
+      renderQueue();
+    });
+
+    row.appendChild(nameInput);
+    row.appendChild(range);
+    row.appendChild(jumpBtn);
+    row.appendChild(stopToggleBtn);
+    row.appendChild(queueBtn);
+
+    // Only real markers (not the track start) can be removed.
+    if (i > 0) {
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove';
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'Remove this split point';
+      removeBtn.addEventListener('click', () => {
+        track.markers = track.markers.filter(m => m !== sec.start);
+        if (activeSectionIndex >= getSections().length) {
+          activeSectionIndex = getSections().length - 1;
+        }
+        // Section indices shift when the split points change, so any
+        // queued positions for this track would now point at the wrong section.
+        sectionQueue = sectionQueue.filter(item => item.trackId !== track.id);
+        renderQueue();
+        renderSections();
+      });
+      row.appendChild(removeBtn);
+    }
+
+    sectionListEl.appendChild(row);
+  });
+
+  updateNavButtons();
+  drawWaveform();
+}
+
+function updateNavButtons() {
+  const sections = getSections();
+  prevBtn.disabled = activeSectionIndex <= 0;
+  nextBtn.disabled = sectionQueue.length === 0 && activeSectionIndex >= sections.length - 1;
+}
+
+function renderQueue() {
+  queueListEl.innerHTML = '';
+  if (sectionQueue.length === 0) {
+    updateNavButtons();
+    return;
+  }
+  sectionQueue.forEach((item, posInQueue) => {
+    const track = tracks.find(t => t.id === item.trackId);
+    const sectionLabel = track ? (track.sectionNames[item.sectionIndex] || `Section ${item.sectionIndex + 1}`) : 'Removed section';
+    const trackLabel = track ? track.name : 'Removed track';
+
+    const chip = document.createElement('span');
+    chip.className = 'queue-chip';
+    chip.append(`${posInQueue + 1}. ${trackLabel} — ${sectionLabel}`);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'remove';
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', () => {
+      sectionQueue.splice(posInQueue, 1);
+      renderQueue();
+    });
+    chip.appendChild(removeBtn);
+    queueListEl.appendChild(chip);
+  });
+  updateNavButtons();
+}
+
+function goToSection(index) {
+  const sections = getSections();
+  if (index < 0 || index >= sections.length) return;
+  activeSectionIndex = index;
+  playerSeek(sections[index].start);
+  renderSections();
+  const track = getCurrentTrack();
+  const label = (track && track.sectionNames[index]) || `Section ${index + 1}`;
+  statusLine.textContent = `Looping: ${label}`;
+  if (track && track.type !== 'spotify') {
+    setupVisualizer();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  if (playerIsPaused()) playerPlay();
+}
+
+// A queue item may belong to the track that's already loaded (just jump
+// within it — no reload) or a different one (switch tracks, then jump
+// once that track's metadata is ready).
+function goToQueueItem(item) {
+  if (item.trackId === currentTrackId) {
+    goToSection(item.sectionIndex);
+  } else {
+    switchToTrack(item.trackId, item.sectionIndex);
+  }
+}
+
+// ----- Local file loading -----
+// Uploaded through the server (rather than just a local blob URL) so the
+// same waveform-generation endpoint can work for every track, whatever
+// its source.
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  showLoading('Adding track…');
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch('/api/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed.');
+    addTrackToLibrary(data.url, data.name);
+  } catch (err) {
+    statusLine.textContent = err.message;
+  } finally {
+    hideLoading();
+    fileInput.value = '';
+  }
+});
+
+// ----- YouTube / SoundCloud import -----
+function looksLikeUrl(text) {
+  return /^https?:\/\//i.test(text);
+}
+
+function showLoading(text) {
+  loadingText.textContent = text;
+  loadingOverlay.classList.remove('hidden');
+}
+function hideLoading() {
+  loadingOverlay.classList.add('hidden');
+}
+
+async function downloadFromUrl(url) {
+  previewAudio.pause();
+  resetPreviewButton();
+  importBtn.disabled = true;
+  resultList.innerHTML = '';
+  importStatus.classList.remove('error');
+  showLoading('Downloading… this can take a bit for longer tracks.');
+
+  try {
+    const res = await fetch('/api/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Download failed.');
+
+    addTrackToLibrary(data.url, data.name);
+    importStatus.textContent = `Imported: ${data.name}`;
+    importUrl.value = '';
+  } catch (err) {
+    importStatus.textContent = err.message;
+    importStatus.classList.add('error');
+  } finally {
+    importBtn.disabled = false;
+    hideLoading();
+  }
+}
+
+function formatDuration(seconds) {
+  if (!seconds) return '';
+  return formatTime(seconds);
+}
+
+function resetPreviewButton() {
+  if (activePreviewBtn) activePreviewBtn.textContent = '▶ Preview';
+  activePreviewBtn = null;
+}
+previewAudio.addEventListener('ended', resetPreviewButton);
+
+// Plays a short (~20s) clip fetched fresh from the server, so you can
+// hear a track before spending time on the full download.
+async function togglePreview(url, btn) {
+  // Clicking the currently-playing preview's button again just stops it.
+  if (activePreviewBtn === btn) {
+    previewAudio.pause();
+    resetPreviewButton();
+    return;
+  }
+
+  resetPreviewButton();
+  playerPause(); // don't overlap with the main track
+  activePreviewBtn = btn;
+  btn.textContent = 'Loading…';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Preview failed.');
+
+    previewAudio.src = data.url;
+    await previewAudio.play();
+    btn.textContent = '■ Stop';
+  } catch (err) {
+    btn.textContent = '▶ Preview';
+    activePreviewBtn = null;
+    importStatus.textContent = err.message;
+    importStatus.classList.add('error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runSearch(query) {
+  previewAudio.pause();
+  resetPreviewButton();
+  importBtn.disabled = true;
+  resultList.innerHTML = '';
+  importStatus.classList.remove('error');
+
+  if (searchSource === 'spotify') {
+    await runSpotifySearch(query);
+    importBtn.disabled = false;
+    return;
+  }
+
+  importStatus.textContent = 'Searching…';
+
+  try {
+    const res = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, source: searchSource })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Search failed.');
+
+    if (!data.results.length) {
+      importStatus.textContent = 'No results found.';
+      return;
+    }
+    importStatus.textContent = `Found ${data.results.length} result(s) — click one to download it.`;
+    data.results.forEach(result => {
+      const row = document.createElement('div');
+      row.className = 'result-row';
+
+      const info = document.createElement('div');
+      info.className = 'info';
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = result.title;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = [result.uploader, formatDuration(result.duration)].filter(Boolean).join(' · ');
+      info.appendChild(title);
+      info.appendChild(meta);
+
+      const previewBtn = document.createElement('button');
+      previewBtn.textContent = '▶ Preview';
+      previewBtn.addEventListener('click', () => togglePreview(result.url, previewBtn));
+
+      const useBtn = document.createElement('button');
+      useBtn.textContent = 'Download';
+      useBtn.addEventListener('click', () => downloadFromUrl(result.url));
+
+      row.appendChild(info);
+      row.appendChild(previewBtn);
+      row.appendChild(useBtn);
+      resultList.appendChild(row);
+    });
+  } catch (err) {
+    importStatus.textContent = err.message;
+    importStatus.classList.add('error');
+  } finally {
+    importBtn.disabled = false;
+  }
+}
+
+importBtn.addEventListener('click', () => {
+  const text = importUrl.value.trim();
+  if (!text) return;
+  if (looksLikeUrl(text)) {
+    downloadFromUrl(text);
+  } else {
+    runSearch(text);
+  }
+});
+importUrl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') importBtn.click();
+});
+
+audio.addEventListener('loadedmetadata', () => {
+  seekBar.max = audio.duration;
+  durationLabel.textContent = formatTime(audio.duration);
+  const track = getCurrentTrack();
+  if (track) track.duration = audio.duration;
+
+  if (pendingSectionIndex !== null) {
+    const idx = pendingSectionIndex;
+    pendingSectionIndex = null;
+    goToSection(idx);
+  } else {
+    renderSections();
+  }
+});
+
+// ----- Waveform overview (loudness across the whole track, like Audacity) -----
+const waveformCtx = waveform.getContext('2d');
+
+async function loadWaveform(track) {
+  track.peaks = null;
+  waveformHint.textContent = 'Generating waveform…';
+  drawWaveform();
+  try {
+    const res = await fetch('/api/waveform', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: track.src })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    // The track may have changed again while this request was in flight.
+    if (getCurrentTrack() === track) {
+      track.peaks = data.peaks;
+      waveformHint.textContent = '';
+      drawWaveform();
+    }
+  } catch {
+    if (getCurrentTrack() === track) {
+      waveformHint.textContent = "Couldn't generate a waveform for this track.";
+    }
+  }
+}
+
+function drawWaveform() {
+  waveform.width = waveform.clientWidth;
+  waveform.height = waveform.clientHeight;
+  const w = waveform.width, h = waveform.height, mid = h / 2;
+  waveformCtx.clearRect(0, 0, w, h);
+
+  const track = getCurrentTrack();
+  if (!track || !track.peaks) return;
+
+  const peaks = track.peaks;
+  const barWidth = w / peaks.length;
+  waveformCtx.fillStyle = '#4a4a6a';
+  for (let i = 0; i < peaks.length; i++) {
+    const barHeight = Math.max(1, peaks[i] * h);
+    waveformCtx.fillRect(i * barWidth, mid - barHeight / 2, Math.max(1, barWidth - 1), barHeight);
+  }
+
+  const duration = track.duration || playerGetDuration() || 0;
+  if (duration > 0) {
+    // Marker lines, so you can see exactly where each split point falls
+    // relative to the loud/quiet parts of the track.
+    waveformCtx.strokeStyle = '#e8e8ec';
+    waveformCtx.lineWidth = 2;
+    track.markers.forEach(m => {
+      const x = (m / duration) * w;
+      waveformCtx.beginPath();
+      waveformCtx.moveTo(x, 0);
+      waveformCtx.lineTo(x, h);
+      waveformCtx.stroke();
+    });
+
+    // Playhead
+    waveformCtx.strokeStyle = '#7fb84a';
+    waveformCtx.lineWidth = 2;
+    const px = (playerGetCurrentTime() / duration) * w;
+    waveformCtx.beginPath();
+    waveformCtx.moveTo(px, 0);
+    waveformCtx.lineTo(px, h);
+    waveformCtx.stroke();
+  }
+}
+
+waveform.addEventListener('click', (e) => {
+  const track = getCurrentTrack();
+  const duration = track && (track.duration || playerGetDuration());
+  if (!duration) return;
+  const rect = waveform.getBoundingClientRect();
+  const ratio = (e.clientX - rect.left) / rect.width;
+  playerSeek(ratio * duration);
+});
+
+// ----- Audio visualizer (the frequency "spike bars") -----
+// Browsers only allow starting an AudioContext after a user gesture, so
+// this is set up lazily on the first Play click rather than on page load.
+let audioCtx, analyser, visualizerData;
+const visCtx = visualizer.getContext('2d');
+
+function setupVisualizer() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaElementSource(audio);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 64; // fewer bins = fewer, chunkier bars
+  visualizerData = new Uint8Array(analyser.frequencyBinCount);
+
+  // Route audio through the analyser on its way to the speakers so we
+  // can read its frequency data without changing what's heard.
+  source.connect(analyser);
+  analyser.connect(audioCtx.destination);
+
+  visualizer.width = visualizer.clientWidth;
+  visualizer.height = visualizer.clientHeight;
+  drawVisualizer();
+}
+
+function drawVisualizer() {
+  requestAnimationFrame(drawVisualizer);
+  analyser.getByteFrequencyData(visualizerData);
+
+  visCtx.clearRect(0, 0, visualizer.width, visualizer.height);
+  const barWidth = visualizer.width / visualizerData.length;
+  for (let i = 0; i < visualizerData.length; i++) {
+    const barHeight = (visualizerData[i] / 255) * visualizer.height;
+    visCtx.fillStyle = '#5865f2';
+    visCtx.fillRect(i * barWidth, visualizer.height - barHeight, barWidth - 2, barHeight);
+  }
+}
+
+// ----- Spotify: login (PKCE), Web Playback SDK, and search -----
+// PKCE needs no client secret, so this Client ID is safe to keep in
+// client-side code — it identifies the app, not a user or credential.
+const SPOTIFY_CLIENT_ID = '5e5be6e3342e482aada957f6193f7ac6';
+const SPOTIFY_REDIRECT_URI = 'http://127.0.0.1:3000/callback';
+const SPOTIFY_SCOPES = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
+
+let spotifyPlayerInstance = null;
+let spotifyDeviceId = null;
+let spotifyState = { currentTime: 0, duration: 0, paused: true };
+let spotifyPollHandle = null;
+
+function base64UrlEncode(bytes) {
+  let str = btoa(String.fromCharCode(...bytes));
+  return str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function randomPkceString(length) {
+  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(length))).slice(0, length);
+}
+async function sha256(text) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+}
+
+async function redirectToSpotifyLogin() {
+  const verifier = randomPkceString(64);
+  localStorage.setItem('spotify_verifier', verifier);
+  const challenge = base64UrlEncode(await sha256(verifier));
+
+  const params = new URLSearchParams({
+    client_id: SPOTIFY_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: SPOTIFY_REDIRECT_URI,
+    scope: SPOTIFY_SCOPES,
+    code_challenge_method: 'S256',
+    code_challenge: challenge
+  });
+  window.location.href = `https://accounts.spotify.com/authorize?${params}`;
+}
+
+function storeSpotifyTokens(data) {
+  localStorage.setItem('spotify_access_token', data.access_token);
+  if (data.refresh_token) localStorage.setItem('spotify_refresh_token', data.refresh_token);
+  localStorage.setItem('spotify_expires_at', String(Date.now() + data.expires_in * 1000));
+}
+
+async function exchangeSpotifyCode(code) {
+  const verifier = localStorage.getItem('spotify_verifier');
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: SPOTIFY_CLIENT_ID,
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: SPOTIFY_REDIRECT_URI,
+      code_verifier: verifier
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || 'Spotify login failed.');
+  storeSpotifyTokens(data);
+}
+
+async function refreshSpotifyToken() {
+  const refreshToken = localStorage.getItem('spotify_refresh_token');
+  if (!refreshToken) throw new Error('Not connected to Spotify.');
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: SPOTIFY_CLIENT_ID,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || 'Could not refresh Spotify session.');
+  storeSpotifyTokens(data);
+}
+
+async function getValidSpotifyToken() {
+  if (!localStorage.getItem('spotify_access_token')) return null;
+  const expiresAt = Number(localStorage.getItem('spotify_expires_at') || 0);
+  if (Date.now() > expiresAt - 30000) await refreshSpotifyToken();
+  return localStorage.getItem('spotify_access_token');
+}
+
+function isSpotifyConnected() {
+  return !!localStorage.getItem('spotify_refresh_token');
+}
+
+function disconnectSpotify() {
+  localStorage.removeItem('spotify_access_token');
+  localStorage.removeItem('spotify_refresh_token');
+  localStorage.removeItem('spotify_expires_at');
+  localStorage.removeItem('spotify_verifier');
+  if (spotifyPlayerInstance) spotifyPlayerInstance.disconnect();
+  spotifyPlayerInstance = null;
+  spotifyDeviceId = null;
+  renderSpotifyStatus();
+}
+
+function renderSpotifyStatus() {
+  if (isSpotifyConnected()) {
+    spotifyStatus.textContent = 'Connected to Spotify.';
+    spotifyConnectBtn.textContent = 'Disconnect';
+  } else {
+    spotifyStatus.textContent = 'Not connected to Spotify.';
+    spotifyConnectBtn.textContent = 'Connect Spotify';
+  }
+}
+
+spotifyConnectBtn.addEventListener('click', () => {
+  if (isSpotifyConnected()) disconnectSpotify();
+  else redirectToSpotifyLogin();
+});
+
+function loadSpotifySdk() {
+  return new Promise((resolve) => {
+    if (window.Spotify) return resolve();
+    window.onSpotifyWebPlaybackSDKReady = resolve;
+    const script = document.createElement('script');
+    script.src = 'https://sdk.scdn.co/spotify-player.js';
+    document.head.appendChild(script);
+  });
+}
+
+async function initSpotifyPlayerIfConnected() {
+  if (!isSpotifyConnected() || spotifyPlayerInstance) return;
+  await loadSpotifySdk();
+  spotifyPlayerInstance = new Spotify.Player({
+    name: 'TTRPG Music App',
+    getOAuthToken: async (cb) => cb(await getValidSpotifyToken()),
+    volume: 0.8
+  });
+  spotifyPlayerInstance.addListener('ready', ({ device_id }) => { spotifyDeviceId = device_id; });
+  spotifyPlayerInstance.addListener('not_ready', () => { spotifyDeviceId = null; });
+  spotifyPlayerInstance.addListener('initialization_error', ({ message }) => console.error('Spotify init error:', message));
+  spotifyPlayerInstance.addListener('authentication_error', ({ message }) => console.error('Spotify auth error:', message));
+  spotifyPlayerInstance.addListener('account_error', () => {
+    statusLine.textContent = 'Spotify Premium is required for in-app playback.';
+  });
+  await spotifyPlayerInstance.connect();
+}
+
+async function startSpotifyTrack(track) {
+  const token = await getValidSpotifyToken();
+  if (!token) throw new Error('Connect your Spotify account first.');
+
+  // The device can take a moment to register right after connecting.
+  for (let i = 0; i < 20 && !spotifyDeviceId; i++) {
+    await new Promise(r => setTimeout(r, 250));
+  }
+  if (!spotifyDeviceId) throw new Error('Spotify player is not ready yet — try again in a second.');
+
+  const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uris: [track.spotifyUri] })
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new Error(res.status === 403 ? 'Spotify Premium is required for in-app playback.' : 'Could not start Spotify playback.');
+  }
+  startSpotifyPolling();
+}
+
+function startSpotifyPolling() {
+  stopSpotifyPolling();
+  spotifyPollHandle = setInterval(async () => {
+    if (!spotifyPlayerInstance) return;
+    const state = await spotifyPlayerInstance.getCurrentState();
+    if (!state) return;
+    spotifyState.currentTime = state.position / 1000;
+    spotifyState.duration = state.duration / 1000;
+    spotifyState.paused = state.paused;
+    playerEvents.dispatchEvent(new Event('timeupdate'));
+  }, 250);
+}
+function stopSpotifyPolling() {
+  if (spotifyPollHandle) clearInterval(spotifyPollHandle);
+  spotifyPollHandle = null;
+}
+
+async function runSpotifySearch(query) {
+  if (!isSpotifyConnected()) {
+    importStatus.textContent = 'Connect your Spotify account first.';
+    importStatus.classList.add('error');
+    return;
+  }
+  importStatus.textContent = 'Searching Spotify…';
+  try {
+    const token = await getValidSpotifyToken();
+    const res = await fetch(`https://api.spotify.com/v1/search?type=track&limit=8&q=${encodeURIComponent(query)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data.error && data.error.message) || 'Spotify search failed.');
+
+    const items = data.tracks.items;
+    if (!items.length) {
+      importStatus.textContent = 'No results found.';
+      return;
+    }
+    importStatus.textContent = `Found ${items.length} result(s) — click one to add it.`;
+    items.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'result-row';
+
+      const artists = item.artists.map(a => a.name).join(', ');
+      const info = document.createElement('div');
+      info.className = 'info';
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = item.name;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = [artists, formatDuration(item.duration_ms / 1000)].filter(Boolean).join(' · ');
+      info.appendChild(title);
+      info.appendChild(meta);
+
+      const useBtn = document.createElement('button');
+      useBtn.textContent = 'Add';
+      useBtn.addEventListener('click', () => addSpotifyTrackToLibrary(item.uri, item.name, artists, item.duration_ms));
+
+      row.appendChild(info);
+      row.appendChild(useBtn);
+      resultList.appendChild(row);
+    });
+  } catch (err) {
+    importStatus.textContent = err.message;
+    importStatus.classList.add('error');
+  }
+}
+
+async function handleSpotifyRedirect() {
+  const code = new URLSearchParams(window.location.search).get('code');
+  if (!code) return;
+  try {
+    await exchangeSpotifyCode(code);
+  } catch (err) {
+    console.error(err);
+  }
+  window.history.replaceState({}, '', '/');
+  renderSpotifyStatus();
+  initSpotifyPlayerIfConnected();
+}
+
+// ----- Play / pause -----
+playPauseBtn.addEventListener('click', () => {
+  const track = getCurrentTrack();
+  if (track && track.type !== 'spotify') {
+    setupVisualizer();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  if (playerIsPaused()) playerPlay(); else playerPause();
+});
+playerEvents.addEventListener('play', () => { playPauseBtn.textContent = 'Pause'; });
+playerEvents.addEventListener('pause', () => { playPauseBtn.textContent = 'Play'; });
+
+// ----- Seek bar + the core section loop/stop logic -----
+// Driven by playerEvents so the same code works for a local <audio>
+// element or a polled Spotify playback state.
+playerEvents.addEventListener('timeupdate', () => {
+  const t = playerGetCurrentTime();
+  if (!isSeekingByUser) {
+    seekBar.value = t;
+  }
+  currentTimeLabel.textContent = formatTime(t);
+  drawWaveform();
+
+  // Once playback reaches the end of the active section: a normal
+  // section loops back to its own start, but a "stop here" section
+  // just pauses in place instead of looping.
+  const track = getCurrentTrack();
+  const sections = getSections();
+  const current = sections[activeSectionIndex];
+  if (current && t >= current.end - 0.05) {
+    if (track && track.stopSections[activeSectionIndex]) {
+      playerPause();
+      const label = track.sectionNames[activeSectionIndex] || `Section ${activeSectionIndex + 1}`;
+      statusLine.textContent = `Stopped: ${label} — click Next Section to continue.`;
+    } else {
+      playerSeek(current.start);
+    }
+  }
+});
+seekBar.addEventListener('input', () => { isSeekingByUser = true; });
+seekBar.addEventListener('change', () => {
+  playerSeek(Number(seekBar.value));
+  isSeekingByUser = false;
+});
+
+// ----- Markers -----
+addMarkerBtn.addEventListener('click', () => {
+  const track = getCurrentTrack();
+  if (!track) return;
+  const t = playerGetCurrentTime();
+  const duration = playerGetDuration();
+  // Ignore marker requests too close to an existing one or the very edges.
+  if (t < 0.2 || t > duration - 0.2) return;
+  if (track.markers.some(m => Math.abs(m - t) < 0.2)) return;
+  track.markers.push(t);
+  // Section indices shift when a new split point is added, so any
+  // queued positions for this track would now point at the wrong section.
+  sectionQueue = sectionQueue.filter(item => item.trackId !== track.id);
+  renderQueue();
+  renderSections();
+});
+
+// ----- Next / Previous section -----
+nextBtn.addEventListener('click', () => {
+  // A queued section takes priority over just moving to the next one in order.
+  if (sectionQueue.length > 0) {
+    const item = sectionQueue.shift();
+    renderQueue();
+    goToQueueItem(item);
+  } else {
+    goToSection(activeSectionIndex + 1);
+  }
+});
+prevBtn.addEventListener('click', () => goToSection(activeSectionIndex - 1));
+
+renderTrackList();
+renderSpotifyStatus();
+if (new URLSearchParams(window.location.search).get('code')) {
+  handleSpotifyRedirect();
+} else if (isSpotifyConnected()) {
+  initSpotifyPlayerIfConnected();
+}
+</script>
+
+</body>
+</html>
