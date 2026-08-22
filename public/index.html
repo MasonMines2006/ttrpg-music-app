@@ -183,6 +183,33 @@
 
   .stop-toggle.stop-active { background: #5a3232; }
 
+  #themeFilterSelect {
+    width: 100%;
+    background: #1e1e24;
+    border: 1px solid #444450;
+    border-radius: 6px;
+    color: #e8e8ec;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+  }
+  #themeRecommendBar { margin-bottom: 10px; }
+  #themeRecommendBar button { width: 100%; }
+
+  .theme-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    flex: 1 1 100%;
+  }
+  .theme-pill {
+    background: #444450;
+    color: #c8c8d0;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+  }
+
   .queue-chip {
     display: flex;
     align-items: center;
@@ -274,6 +301,10 @@
   <h1>TTRPG Music App</h1>
   <p class="subtitle">Loop one section forever.</p>
   <h2 class="panel-title">Your Tracks</h2>
+  <select id="themeFilterSelect"><option value="all">All themes</option></select>
+  <div id="themeRecommendBar" style="display:none;">
+    <button id="findThemeMusicBtn"></button>
+  </div>
   <div id="trackList"></div>
 </aside>
 
@@ -372,6 +403,10 @@ const visualizer = document.getElementById('visualizer');
 const sourceYoutube = document.getElementById('sourceYoutube');
 const sourceSoundcloud = document.getElementById('sourceSoundcloud');
 const trackListEl = document.getElementById('trackList');
+const themeFilterSelect = document.getElementById('themeFilterSelect');
+const themeRecommendBar = document.getElementById('themeRecommendBar');
+const findThemeMusicBtn = document.getElementById('findThemeMusicBtn');
+let themeFilter = 'all';
 const waveform = document.getElementById('waveform');
 const waveformWrap = document.getElementById('waveformWrap');
 const waveformHint = document.getElementById('waveformHint');
@@ -549,6 +584,10 @@ function addTrackToLibrary(src, name, image = null) {
     name,
     src,
     image,
+    // Auto-tag with whatever theme is currently being browsed, so finding
+    // and adding recommendations for "battle" music files them under
+    // "battle" without an extra manual step.
+    themes: themeFilter !== 'all' ? [themeFilter] : [],
     duration: 0,
     markers: [],
     sectionNames: {},
@@ -567,6 +606,7 @@ function addSpotifyTrackToLibrary(uri, name, artist, durationMs, image = null) {
     name: `${name} — ${artist}`,
     spotifyUri: uri,
     image,
+    themes: themeFilter !== 'all' ? [themeFilter] : [],
     duration: durationMs / 1000,
     markers: [],
     sectionNames: {},
@@ -725,13 +765,64 @@ function removeTrack(id) {
   renderTrackList();
 }
 
+// ----- Themes: a lightweight tagging layer for browsing by mood
+// (battle, night, day, ...) independent of the section-cutting workflow. -----
+function getAllThemes() {
+  const set = new Set();
+  tracks.forEach(t => (t.themes || []).forEach(theme => set.add(theme)));
+  return [...set].sort();
+}
+
+function updateThemeRecommendBar() {
+  if (themeFilter === 'all') {
+    themeRecommendBar.style.display = 'none';
+  } else {
+    themeRecommendBar.style.display = 'block';
+    findThemeMusicBtn.textContent = `🔍 Find "${themeFilter}" music`;
+  }
+}
+
+function renderThemeFilterOptions() {
+  const themes = getAllThemes();
+  const previousValue = themeFilter;
+  themeFilterSelect.innerHTML = '<option value="all">All themes</option>';
+  themes.forEach(theme => {
+    const opt = document.createElement('option');
+    opt.value = theme;
+    opt.textContent = theme;
+    themeFilterSelect.appendChild(opt);
+  });
+  // If the selected theme's last track was removed, fall back to "All"
+  // instead of pointing at an option that no longer exists.
+  themeFilter = (previousValue === 'all' || themes.includes(previousValue)) ? previousValue : 'all';
+  themeFilterSelect.value = themeFilter;
+  updateThemeRecommendBar();
+}
+
+themeFilterSelect.addEventListener('change', () => {
+  themeFilter = themeFilterSelect.value;
+  updateThemeRecommendBar();
+  renderTrackList();
+});
+
+findThemeMusicBtn.addEventListener('click', () => {
+  importUrl.value = `${themeFilter} music`;
+  importBtn.click();
+});
+
 function renderTrackList() {
+  renderThemeFilterOptions();
+  const visibleTracks = themeFilter === 'all' ? tracks : tracks.filter(t => (t.themes || []).includes(themeFilter));
+
   trackListEl.innerHTML = '';
-  if (tracks.length === 0) {
-    trackListEl.innerHTML = '<p class="hint">No tracks loaded yet — search, paste a link, or upload a file above.</p>';
+  if (visibleTracks.length === 0) {
+    trackListEl.innerHTML = tracks.length === 0
+      ? '<p class="hint">No tracks loaded yet — search, paste a link, or upload a file above.</p>'
+      : `<p class="hint">No tracks tagged "${themeFilter}" yet.</p>`;
+    scheduleSave();
     return;
   }
-  tracks.forEach(track => {
+  visibleTracks.forEach(track => {
     const row = document.createElement('div');
     row.className = 'track-row' + (track.id === currentTrackId ? ' active' : '');
 
@@ -743,6 +834,30 @@ function renderTrackList() {
     name.textContent = track.name;
     main.appendChild(name);
     row.appendChild(main);
+
+    if (track.themes && track.themes.length) {
+      const pills = document.createElement('div');
+      pills.className = 'theme-pills';
+      track.themes.forEach(theme => {
+        const pill = document.createElement('span');
+        pill.className = 'theme-pill';
+        pill.textContent = theme;
+        pills.appendChild(pill);
+      });
+      row.appendChild(pills);
+    }
+
+    const tagBtn = document.createElement('button');
+    tagBtn.textContent = '🏷️';
+    tagBtn.title = 'Tag this track with themes (e.g. battle, night, tavern)';
+    tagBtn.addEventListener('click', () => {
+      const current = (track.themes || []).join(', ');
+      const input = window.prompt('Themes for this track, comma-separated:', current);
+      if (input === null) return; // cancelled
+      track.themes = input.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      renderTrackList();
+    });
+    row.appendChild(tagBtn);
 
     const queueBtn = document.createElement('button');
     queueBtn.textContent = '+ Queue';
