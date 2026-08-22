@@ -4,16 +4,47 @@
 <meta charset="UTF-8">
 <title>TTRPG Music App</title>
 <style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
+    margin: 0;
     font-family: system-ui, sans-serif;
-    max-width: 700px;
-    margin: 40px auto;
-    padding: 0 16px;
     background: #1e1e24;
     color: #e8e8ec;
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr) 280px;
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+      "sidebar main queue"
+      "player  player player";
   }
-  h1 { font-size: 1.4rem; margin-bottom: 4px; }
-  p.subtitle { color: #9a9aa5; margin-top: 0; }
+  audio { display: none; }
+
+  h1 { font-size: 1.2rem; margin: 0 0 4px; }
+  p.subtitle { color: #9a9aa5; margin: 0 0 20px; font-size: 0.85rem; }
+  h2.panel-title {
+    font-size: 0.8rem; margin: 0 0 10px; color: #9a9aa5;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  .sidebar {
+    grid-area: sidebar;
+    padding: 20px 14px;
+    overflow-y: auto;
+    border-right: 1px solid #33333e;
+  }
+  .main-panel {
+    grid-area: main;
+    padding: 20px;
+    overflow-y: auto;
+    min-width: 0;
+  }
+  .queue-panel {
+    grid-area: queue;
+    padding: 20px 14px;
+    overflow-y: auto;
+    border-left: 1px solid #33333e;
+  }
 
   .card {
     background: #2a2a33;
@@ -39,6 +70,7 @@
     gap: 10px;
     margin-top: 12px;
   }
+  .transport.no-margin { margin-top: 0; }
 
   button {
     background: #3d3d4a;
@@ -57,7 +89,7 @@
 
   input[type="range"] { flex: 1; }
 
-  .time { font-variant-numeric: tabular-nums; min-width: 90px; text-align: center; }
+  .time { font-variant-numeric: tabular-nums; min-width: 40px; text-align: center; font-size: 0.85rem; }
 
   .section-row {
     display: flex;
@@ -67,6 +99,7 @@
     border-radius: 6px;
     margin-bottom: 6px;
     background: #33333e;
+    flex-wrap: wrap;
   }
   .section-row.active {
     background: #3d4a2a;
@@ -74,6 +107,7 @@
   }
   .section-row input[type="text"] {
     flex: 1;
+    min-width: 100px;
     background: transparent;
     border: none;
     color: #e8e8ec;
@@ -82,13 +116,6 @@
   .section-row input[type="text"]:focus { outline: 1px solid #5865f2; }
   .section-row .range { color: #9a9aa5; font-size: 0.85rem; min-width: 100px; }
   .section-row .remove { background: none; color: #c96; padding: 2px 8px; }
-
-  .big-controls {
-    display: flex;
-    gap: 10px;
-    margin-top: 12px;
-  }
-  .big-controls button { flex: 1; padding: 14px; font-size: 1.05rem; }
 
   .hint { color: #9a9aa5; font-size: 0.85rem; margin-top: 6px; }
   .divider { color: #66666f; text-align: center; margin: 12px 0; font-size: 0.85rem; }
@@ -114,29 +141,36 @@
   .track-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     padding: 8px;
     border-radius: 6px;
     margin-bottom: 6px;
     background: #33333e;
+    flex-wrap: wrap;
   }
   .track-row.active { background: #3d4a2a; outline: 1px solid #7fb84a; }
-  .track-row .track-name { flex: 1; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track-row .track-name {
+    flex: 1 1 100%;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   .stop-toggle.stop-active { background: #5a3232; }
 
   .queue-chip {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 6px;
     background: #33333e;
-    border-radius: 999px;
-    padding: 4px 6px 4px 12px;
-    margin: 0 6px 6px 0;
-    font-size: 0.85rem;
+    border-radius: 8px;
+    padding: 6px 6px 6px 12px;
+    margin-bottom: 6px;
+    font-size: 0.82rem;
   }
   .queue-chip .remove { background: none; padding: 2px 6px; color: #c96; }
-  #queueList { margin-top: 10px; }
 
   #visualizer {
     display: block;
@@ -156,6 +190,27 @@
     background: #1e1e24;
     cursor: pointer;
   }
+
+  .player-bar {
+    grid-area: player;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 20px;
+    background: #24242c;
+    border-top: 1px solid #33333e;
+  }
+  .now-playing {
+    flex: 1 1 200px;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: #c8c8d0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .player-transport { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+  .player-seek { display: flex; align-items: center; gap: 8px; flex: 2 1 260px; min-width: 160px; }
 
   .loading-overlay {
     position: fixed;
@@ -179,72 +234,83 @@
   }
   #loadingText { color: #e8e8ec; font-size: 1rem; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 900px) {
+    body { display: block; height: auto; }
+    .sidebar, .main-panel, .queue-panel { border: none; padding: 16px; overflow-y: visible; }
+    .player-bar { position: sticky; bottom: 0; flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body>
 
-<h1>TTRPG Music App</h1>
-<p class="subtitle">Loop one section forever. Click "Next Section" the instant you finish describing it.</p>
-
-<div class="card">
-  <div class="transport">
-    <input type="url" id="importUrl" placeholder="Paste a link, or type a song name to search">
-    <div class="source-toggle">
-      <button id="sourceYoutube" class="selected">YouTube</button>
-      <button id="sourceSoundcloud">SoundCloud</button>
-      <button id="sourceSpotify">Spotify</button>
-    </div>
-    <button id="importBtn">Go</button>
-  </div>
-  <p class="hint" id="importStatus">Downloads audio only, to this computer, for your own use.</p>
-  <div id="resultList"></div>
-
-  <div class="divider">— or —</div>
-
-  <input type="file" id="fileInput" accept="audio/*">
-</div>
-
-<div class="card">
-  <div class="transport">
-    <span class="hint" id="spotifyStatus" style="flex:1;">Not connected to Spotify.</span>
-    <button id="spotifyConnectBtn">Connect Spotify</button>
-  </div>
-</div>
-
-<div class="card">
-  <h2 style="font-size:1.05rem; margin-top:0;">Your Tracks</h2>
+<aside class="sidebar">
+  <h1>TTRPG Music App</h1>
+  <p class="subtitle">Loop one section forever.</p>
+  <h2 class="panel-title">Your Tracks</h2>
   <div id="trackList"></div>
-</div>
+</aside>
 
-<div class="card">
-  <div class="transport">
+<main class="main-panel">
+  <div class="card">
+    <div class="transport no-margin">
+      <input type="url" id="importUrl" placeholder="Paste a link, or type a song name to search">
+      <div class="source-toggle">
+        <button id="sourceYoutube" class="selected">YouTube</button>
+        <button id="sourceSoundcloud">SoundCloud</button>
+        <button id="sourceSpotify">Spotify</button>
+      </div>
+      <button id="importBtn">Go</button>
+    </div>
+    <p class="hint" id="importStatus">Downloads audio only, to this computer, for your own use.</p>
+    <div id="resultList"></div>
+
+    <div class="divider">— or —</div>
+
+    <input type="file" id="fileInput" accept="audio/*">
+  </div>
+
+  <div class="card">
+    <div class="transport no-margin">
+      <span class="hint" id="spotifyStatus" style="flex:1;">Not connected to Spotify.</span>
+      <button id="spotifyConnectBtn">Connect Spotify</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="transport no-margin">
+      <button id="addMarkerBtn" disabled>+ Add Marker Here</button>
+      <span class="hint">Splits the track into a new section at the current playback time.</span>
+    </div>
+    <canvas id="waveform" title="Loudness across the whole track — click to jump there."></canvas>
+    <p class="hint" id="waveformHint"></p>
+    <canvas id="visualizer"></canvas>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.05rem; margin-top:0;">Sections</h2>
+    <div id="sectionList"></div>
+  </div>
+</main>
+
+<aside class="queue-panel">
+  <h2 class="panel-title">Up Next</h2>
+  <div id="queueList"></div>
+</aside>
+
+<footer class="player-bar">
+  <div class="now-playing" id="statusLine">Load a track to get started.</div>
+  <div class="player-transport">
+    <button id="prevBtn" disabled>&larr; Previous</button>
     <button id="playPauseBtn" disabled>Play</button>
+    <button id="nextBtn" class="primary" disabled>Next Section &rarr;</button>
+  </div>
+  <div class="player-seek">
     <span class="time" id="currentTimeLabel">0:00</span>
     <input type="range" id="seekBar" min="0" max="0" step="0.01" value="0" disabled>
     <span class="time" id="durationLabel">0:00</span>
   </div>
-  <div class="transport">
-    <button id="addMarkerBtn" disabled>+ Add Marker Here</button>
-    <span class="hint">Splits the track into a new section at the current playback time.</span>
-  </div>
-  <canvas id="waveform" title="Loudness across the whole track — click to jump there."></canvas>
-  <p class="hint" id="waveformHint"></p>
-  <canvas id="visualizer"></canvas>
-</div>
-
-<div class="card">
-  <h2 style="font-size:1.05rem; margin-top:0;">Sections</h2>
-  <div id="sectionList"></div>
-</div>
-
-<div class="card">
-  <div id="queueList"></div>
-  <div class="big-controls">
-    <button id="prevBtn" disabled>&larr; Previous Section</button>
-    <button id="nextBtn" class="primary" disabled>Next Section &rarr;</button>
-  </div>
-  <p class="hint" id="statusLine">Load a track to get started.</p>
-</div>
+</footer>
 
 <audio id="audio"></audio>
 <audio id="previewAudio"></audio>
@@ -331,6 +397,77 @@ function getSections() {
   return sections;
 }
 
+// ----- Library persistence (survives server restarts / page reloads) -----
+let saveTimer = null;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    fetch('/api/library', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // peaks are regenerable (and cached server-side already), so they're
+      // dropped here to keep the saved file small.
+      body: JSON.stringify({
+        tracks: tracks.map(({ peaks, _spotifyStarted, ...rest }) => rest),
+        sectionQueue,
+        currentTrackId
+      })
+    }).catch(() => {});
+  }, 500);
+}
+
+async function loadLibraryFromServer() {
+  try {
+    const res = await fetch('/api/library');
+    const data = await res.json();
+    if (!Array.isArray(data.tracks) || data.tracks.length === 0) return;
+    tracks = data.tracks;
+    sectionQueue = Array.isArray(data.sectionQueue) ? data.sectionQueue : [];
+    renderTrackList();
+    renderQueue();
+    if (data.currentTrackId && tracks.some(t => t.id === data.currentTrackId)) {
+      restoreTrackSelection(data.currentTrackId);
+    }
+  } catch {
+    // No saved library yet, or the server isn't reachable — start fresh.
+  }
+}
+
+// Re-selects a track from a saved library without the side effects a
+// live switch has (starting Spotify playback immediately would be a
+// surprise on page load — the user presses Play themselves instead).
+function restoreTrackSelection(id) {
+  const track = tracks.find(t => t.id === id);
+  if (!track) return;
+  currentTrackId = id;
+  activeSectionIndex = 0;
+  playPauseBtn.disabled = false;
+  seekBar.disabled = false;
+  addMarkerBtn.disabled = false;
+  renderTrackList();
+
+  if (track.type === 'spotify') {
+    statusLine.textContent = `Loaded: ${track.name} (press Play to resume)`;
+    waveform.style.display = 'none';
+    visualizer.style.display = 'none';
+    waveformHint.textContent = "Waveform and visualizer aren't available for Spotify tracks.";
+    seekBar.max = track.duration;
+    durationLabel.textContent = formatTime(track.duration);
+    renderSections();
+  } else {
+    statusLine.textContent = `Loaded: ${track.name}`;
+    waveform.style.display = '';
+    visualizer.style.display = '';
+    waveformHint.textContent = '';
+    audio.src = track.src; // just sets the source — does not autoplay
+    renderSections();
+    loadWaveform(track);
+  }
+}
+
+// Adding a track only switches playback to it when it's the very first
+// one — otherwise it just joins the library so you can queue it up
+// without interrupting whatever's already playing.
 function addTrackToLibrary(src, name) {
   const track = {
     id: crypto.randomUUID(),
@@ -342,8 +479,10 @@ function addTrackToLibrary(src, name) {
     sectionNames: {},
     stopSections: {}
   };
+  const wasEmpty = tracks.length === 0;
   tracks.push(track);
-  switchToTrack(track.id);
+  if (wasEmpty) switchToTrack(track.id);
+  else renderTrackList();
 }
 
 function addSpotifyTrackToLibrary(uri, name, artist, durationMs) {
@@ -357,8 +496,10 @@ function addSpotifyTrackToLibrary(uri, name, artist, durationMs) {
     sectionNames: {},
     stopSections: {}
   };
+  const wasEmpty = tracks.length === 0;
   tracks.push(track);
-  switchToTrack(track.id);
+  if (wasEmpty) switchToTrack(track.id);
+  else renderTrackList();
 }
 
 // ----- Unified player interface -----
@@ -373,8 +514,16 @@ function isSpotifyTrack(track) {
   return !!track && track.type === 'spotify';
 }
 function playerPlay() {
-  if (isSpotifyTrack(getCurrentTrack())) {
-    if (spotifyPlayerInstance) spotifyPlayerInstance.resume();
+  const track = getCurrentTrack();
+  if (isSpotifyTrack(track)) {
+    // A track restored from a saved library was never actually handed to
+    // the Spotify device this session, so resume() would have nothing to
+    // resume — it needs to be (re-)started properly first.
+    if (!track._spotifyStarted) {
+      startSpotifyTrack(track).catch(err => { statusLine.textContent = err.message; });
+    } else if (spotifyPlayerInstance) {
+      spotifyPlayerInstance.resume();
+    }
     playerEvents.dispatchEvent(new Event('play'));
   } else {
     audio.play();
@@ -501,8 +650,17 @@ function renderTrackList() {
     name.textContent = track.name;
     row.appendChild(name);
 
+    const queueBtn = document.createElement('button');
+    queueBtn.textContent = '+ Queue';
+    queueBtn.title = "Queue this track to play next, without interrupting what's playing now";
+    queueBtn.addEventListener('click', () => {
+      sectionQueue.push({ trackId: track.id, sectionIndex: 0 });
+      renderQueue();
+    });
+    row.appendChild(queueBtn);
+
     const switchBtn = document.createElement('button');
-    switchBtn.textContent = track.id === currentTrackId ? 'Current' : 'Switch to this';
+    switchBtn.textContent = track.id === currentTrackId ? 'Current' : 'Play now';
     switchBtn.disabled = track.id === currentTrackId;
     switchBtn.addEventListener('click', () => switchToTrack(track.id));
     row.appendChild(switchBtn);
@@ -516,6 +674,7 @@ function renderTrackList() {
 
     trackListEl.appendChild(row);
   });
+  scheduleSave();
 }
 
 function renderSections() {
@@ -557,6 +716,7 @@ function renderSections() {
     stopToggleBtn.addEventListener('click', () => {
       track.stopSections[i] = !track.stopSections[i];
       renderStopToggle();
+      scheduleSave();
     });
 
     const queueBtn = document.createElement('button');
@@ -598,6 +758,7 @@ function renderSections() {
 
   updateNavButtons();
   drawWaveform();
+  scheduleSave();
 }
 
 function updateNavButtons() {
@@ -610,6 +771,7 @@ function renderQueue() {
   queueListEl.innerHTML = '';
   if (sectionQueue.length === 0) {
     updateNavButtons();
+    scheduleSave();
     return;
   }
   sectionQueue.forEach((item, posInQueue) => {
@@ -632,6 +794,7 @@ function renderQueue() {
     queueListEl.appendChild(chip);
   });
   updateNavButtons();
+  scheduleSave();
 }
 
 function goToSection(index) {
@@ -840,9 +1003,126 @@ async function runSearch(query) {
   }
 }
 
+// Recognizes a Spotify playlist/track link (open.spotify.com/... or a
+// spotify:...: URI) regardless of which source toggle is selected, since
+// a pasted Spotify link is unambiguous either way.
+function extractSpotifyId(text, kind) {
+  const urlMatch = text.match(new RegExp(`open\\.spotify\\.com/${kind}/([a-zA-Z0-9]+)`));
+  if (urlMatch) return urlMatch[1];
+  const uriMatch = text.match(new RegExp(`spotify:${kind}:([a-zA-Z0-9]+)`));
+  if (uriMatch) return uriMatch[1];
+  return null;
+}
+
+function renderSpotifyItemRow(item, onAdd) {
+  const artists = item.artists.map(a => a.name).join(', ');
+  const row = document.createElement('div');
+  row.className = 'result-row';
+
+  const info = document.createElement('div');
+  info.className = 'info';
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = item.name;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = [artists, formatDuration(item.duration_ms / 1000)].filter(Boolean).join(' · ');
+  info.appendChild(title);
+  info.appendChild(meta);
+
+  const useBtn = document.createElement('button');
+  useBtn.textContent = 'Add';
+  useBtn.addEventListener('click', () => onAdd(item, artists));
+
+  row.appendChild(info);
+  row.appendChild(useBtn);
+  return row;
+}
+
+async function addSpotifyTrackById(trackId) {
+  if (!isSpotifyConnected()) {
+    importStatus.textContent = 'Connect your Spotify account first.';
+    importStatus.classList.add('error');
+    return;
+  }
+  try {
+    const token = await getValidSpotifyToken();
+    const res = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const item = await res.json();
+    if (!res.ok) throw new Error((item.error && item.error.message) || 'Could not load this track.');
+    const artists = item.artists.map(a => a.name).join(', ');
+    addSpotifyTrackToLibrary(item.uri, item.name, artists, item.duration_ms);
+    importStatus.textContent = `Added: ${item.name}`;
+    importUrl.value = '';
+  } catch (err) {
+    importStatus.textContent = err.message;
+    importStatus.classList.add('error');
+  }
+}
+
+async function importSpotifyPlaylist(playlistId) {
+  if (!isSpotifyConnected()) {
+    importStatus.textContent = 'Connect your Spotify account first.';
+    importStatus.classList.add('error');
+    return;
+  }
+  resultList.innerHTML = '';
+  importStatus.classList.remove('error');
+  importStatus.textContent = 'Loading playlist…';
+
+  try {
+    const token = await getValidSpotifyToken();
+    let items = [];
+    let url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`;
+    while (url) {
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data.error && data.error.message) || 'Could not load this playlist.');
+      items = items.concat(data.items.filter(i => i.track).map(i => i.track));
+      url = data.next; // Spotify paginates playlist tracks in pages of up to 100
+    }
+    if (!items.length) {
+      importStatus.textContent = 'This playlist has no tracks.';
+      return;
+    }
+    importStatus.textContent = `Found ${items.length} track(s) in the playlist.`;
+
+    const addAllBtn = document.createElement('button');
+    addAllBtn.className = 'primary';
+    addAllBtn.textContent = `+ Add all ${items.length} to library`;
+    addAllBtn.addEventListener('click', () => {
+      items.forEach(item => {
+        const artists = item.artists.map(a => a.name).join(', ');
+        addSpotifyTrackToLibrary(item.uri, item.name, artists, item.duration_ms);
+      });
+      addAllBtn.textContent = 'Added!';
+      addAllBtn.disabled = true;
+    });
+    resultList.appendChild(addAllBtn);
+
+    items.forEach(item => {
+      resultList.appendChild(renderSpotifyItemRow(item, (i, artists) =>
+        addSpotifyTrackToLibrary(i.uri, i.name, artists, i.duration_ms)
+      ));
+    });
+  } catch (err) {
+    importStatus.textContent = err.message;
+    importStatus.classList.add('error');
+  }
+}
+
 importBtn.addEventListener('click', () => {
   const text = importUrl.value.trim();
   if (!text) return;
+
+  const playlistId = extractSpotifyId(text, 'playlist');
+  if (playlistId) { importSpotifyPlaylist(playlistId); return; }
+
+  const spotifyTrackId = extractSpotifyId(text, 'track');
+  if (spotifyTrackId) { addSpotifyTrackById(spotifyTrackId); return; }
+
   if (looksLikeUrl(text)) {
     downloadFromUrl(text);
   } else {
@@ -989,7 +1269,7 @@ function drawVisualizer() {
 // client-side code — it identifies the app, not a user or credential.
 const SPOTIFY_CLIENT_ID = '5e5be6e3342e482aada957f6193f7ac6';
 const SPOTIFY_REDIRECT_URI = 'http://127.0.0.1:3000/callback';
-const SPOTIFY_SCOPES = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
+const SPOTIFY_SCOPES = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
 
 let spotifyPlayerInstance = null;
 let spotifyDeviceId = null;
@@ -1147,6 +1427,7 @@ async function startSpotifyTrack(track) {
   if (!res.ok && res.status !== 204) {
     throw new Error(res.status === 403 ? 'Spotify Premium is required for in-app playback.' : 'Could not start Spotify playback.');
   }
+  track._spotifyStarted = true;
   startSpotifyPolling();
 }
 
@@ -1189,28 +1470,9 @@ async function runSpotifySearch(query) {
     }
     importStatus.textContent = `Found ${items.length} result(s) — click one to add it.`;
     items.forEach(item => {
-      const row = document.createElement('div');
-      row.className = 'result-row';
-
-      const artists = item.artists.map(a => a.name).join(', ');
-      const info = document.createElement('div');
-      info.className = 'info';
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = item.name;
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = [artists, formatDuration(item.duration_ms / 1000)].filter(Boolean).join(' · ');
-      info.appendChild(title);
-      info.appendChild(meta);
-
-      const useBtn = document.createElement('button');
-      useBtn.textContent = 'Add';
-      useBtn.addEventListener('click', () => addSpotifyTrackToLibrary(item.uri, item.name, artists, item.duration_ms));
-
-      row.appendChild(info);
-      row.appendChild(useBtn);
-      resultList.appendChild(row);
+      resultList.appendChild(renderSpotifyItemRow(item, (i, artists) =>
+        addSpotifyTrackToLibrary(i.uri, i.name, artists, i.duration_ms)
+      ));
     });
   } catch (err) {
     importStatus.textContent = err.message;
@@ -1308,6 +1570,7 @@ prevBtn.addEventListener('click', () => goToSection(activeSectionIndex - 1));
 
 renderTrackList();
 renderSpotifyStatus();
+loadLibraryFromServer();
 if (new URLSearchParams(window.location.search).get('code')) {
   handleSpotifyRedirect();
 } else if (isSpotifyConnected()) {

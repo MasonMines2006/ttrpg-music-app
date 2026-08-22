@@ -21,6 +21,19 @@ if (!fs.existsSync(WAVEFORMS_DIR)) fs.mkdirSync(WAVEFORMS_DIR);
 const WAVEFORM_BUCKETS = 1200; // resolution of the waveform overview
 const WAVEFORM_SAMPLE_RATE = 4000; // low rate: plenty of detail for an overview, keeps decode fast
 
+// The track library (names, markers, sections, queue) is saved here so it
+// survives a server restart — the audio files themselves already do,
+// since they just sit in downloads/, but this metadata previously only
+// lived in the browser tab's memory.
+const LIBRARY_FILE = path.join(__dirname, 'library.json');
+function loadLibrary() {
+  try {
+    return JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf8'));
+  } catch {
+    return { tracks: [], sectionQueue: [], currentTrackId: null };
+  }
+}
+
 // Previews are throwaway clips — clear old ones out on each server start
 // so they don't pile up.
 for (const file of fs.readdirSync(PREVIEWS_DIR)) {
@@ -229,6 +242,23 @@ app.post('/api/waveform', (req, res) => {
     fs.writeFileSync(cachedPath, JSON.stringify(peaks));
     res.json({ peaks });
   });
+});
+
+app.get('/api/library', (req, res) => {
+  res.json(loadLibrary());
+});
+
+app.post('/api/library', (req, res) => {
+  const { tracks, sectionQueue, currentTrackId } = req.body || {};
+  if (!Array.isArray(tracks)) {
+    return res.status(400).json({ error: 'Invalid library data.' });
+  }
+  fs.writeFileSync(LIBRARY_FILE, JSON.stringify({
+    tracks,
+    sectionQueue: Array.isArray(sectionQueue) ? sectionQueue : [],
+    currentTrackId: currentTrackId || null
+  }, null, 2));
+  res.json({ ok: true });
 });
 
 app.listen(PORT, () => {
