@@ -1676,7 +1676,11 @@ async function loadWaveform(track) {
 // panning — the simplest way to get real "zoom into a region" precision,
 // since the same peaks array just gets spread across more pixels.
 function setWaveformZoom(newZoom) {
-  waveformZoom = Math.min(MAX_WAVEFORM_ZOOM, Math.max(1, newZoom));
+  const clamped = Math.min(MAX_WAVEFORM_ZOOM, Math.max(1, newZoom));
+  // Pinch/scroll zooming multiplies by Math.exp(...), which produces long
+  // decimals (e.g. 2.7182818...) — round to 2 decimal places so the label
+  // (and the zoom level itself) stays readable.
+  waveformZoom = Math.round(clamped * 100) / 100;
   zoomLabel.textContent = `${waveformZoom}×`;
   drawWaveform();
 }
