@@ -1450,6 +1450,12 @@ function friendlySpotifyError(err) {
   if (/insufficient client scope/i.test(err.message)) {
     return 'Spotify needs permission to see your playlists — click Disconnect, then Connect Spotify again to grant it.';
   }
+  // A bare "Forbidden" (as opposed to the scope error above) almost always
+  // means the playlist itself is off-limits — most commonly one of
+  // Spotify's own curated playlists, which block API access to their tracks.
+  if (/^forbidden$/i.test(err.message)) {
+    return "Spotify blocked access to this playlist's tracks — this usually happens with Spotify's own curated playlists (Discover Weekly, Daily Mix, etc.). Try one of your own playlists instead.";
+  }
   return err.message;
 }
 
@@ -1504,6 +1510,17 @@ async function importSpotifyPlaylist(playlistId) {
   }
 }
 
+// Spotify's own curated/algorithmic playlists (Discover Weekly, Daily Mix,
+// Release Radar, etc.) show up in a user's playlist list since they follow
+// them, but Spotify blocks third-party API access to their actual track
+// contents — fetching them 403s with "Forbidden" and their track count
+// often comes back missing. They're always owned by the special "spotify"
+// account, so that's a reliable way to spot and label them upfront instead
+// of leading someone into a dead-end click.
+function isSpotifyCuratedPlaylist(playlist) {
+  return !!(playlist.owner && playlist.owner.id === 'spotify');
+}
+
 function renderPlaylistRow(playlist) {
   const row = document.createElement('div');
   row.className = 'result-row';
@@ -1518,14 +1535,20 @@ function renderPlaylistRow(playlist) {
   title.textContent = playlist.name;
   const meta = document.createElement('div');
   meta.className = 'meta';
+  const curated = isSpotifyCuratedPlaylist(playlist);
   const trackCount = playlist.tracks && typeof playlist.tracks.total === 'number' ? playlist.tracks.total : '?';
-  meta.textContent = `${trackCount} track(s)`;
+  meta.textContent = curated ? "Spotify-curated — not browsable via the API" : `${trackCount} track(s)`;
   info.appendChild(title);
   info.appendChild(meta);
 
   const viewBtn = document.createElement('button');
   viewBtn.textContent = 'View tracks';
-  viewBtn.addEventListener('click', () => importSpotifyPlaylist(playlist.id));
+  if (curated) {
+    viewBtn.disabled = true;
+    viewBtn.title = "Spotify blocks API access to its own curated playlists (Discover Weekly, Daily Mix, etc.) — try one of your own playlists instead.";
+  } else {
+    viewBtn.addEventListener('click', () => importSpotifyPlaylist(playlist.id));
+  }
 
   row.appendChild(info);
   row.appendChild(viewBtn);
