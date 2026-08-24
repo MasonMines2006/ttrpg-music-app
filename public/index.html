@@ -1456,11 +1456,40 @@ function drawWaveform() {
     if (waveformZoom > 1) {
       const viewLeft = waveformWrap.scrollLeft;
       const viewRight = viewLeft + waveformWrap.clientWidth;
-      if (px < viewLeft || px > viewRight) {
-        waveformWrap.scrollLeft = px - waveformWrap.clientWidth / 2;
+      // Nudge just enough to bring the playhead back into view (to the
+      // near edge) instead of recentering it — recentering causes a big
+      // jump on every small arrow-key nudge, which feels jarring.
+      if (px < viewLeft) {
+        waveformWrap.scrollLeft = px;
+      } else if (px > viewRight) {
+        waveformWrap.scrollLeft = px - waveformWrap.clientWidth;
       }
     }
   }
+}
+
+// Finds which section a given time falls into, so clicking anywhere on
+// the waveform (not just inside the currently-looping section) can jump
+// there directly instead of snapping back on the next loop check.
+function sectionIndexAtTime(sections, time) {
+  for (let i = 0; i < sections.length; i++) {
+    if (time < sections[i].end || i === sections.length - 1) return i;
+  }
+  return sections.length - 1;
+}
+
+function seekToTime(time) {
+  const sections = getSections();
+  if (sections.length === 0) return;
+  const index = sectionIndexAtTime(sections, time);
+  if (index !== activeSectionIndex) {
+    activeSectionIndex = index;
+    renderSections();
+    const track = getCurrentTrack();
+    const label = (track && track.sectionNames[index]) || `Section ${index + 1}`;
+    statusLine.textContent = `Looping: ${label}`;
+  }
+  playerSeek(time);
 }
 
 waveform.addEventListener('click', (e) => {
@@ -1469,7 +1498,7 @@ waveform.addEventListener('click', (e) => {
   if (!duration) return;
   const rect = waveform.getBoundingClientRect();
   const ratio = (e.clientX - rect.left) / rect.width;
-  playerSeek(ratio * duration);
+  seekToTime(ratio * duration);
 });
 
 // ----- Audio visualizer (the frequency "spike bars") -----
@@ -1810,7 +1839,7 @@ playerEvents.addEventListener('timeupdate', () => {
 });
 seekBar.addEventListener('input', () => { isSeekingByUser = true; });
 seekBar.addEventListener('change', () => {
-  playerSeek(Number(seekBar.value));
+  seekToTime(Number(seekBar.value));
   isSeekingByUser = false;
 });
 
