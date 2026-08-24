@@ -223,6 +223,36 @@
   }
   .theme-pill-remove:hover { color: #fff; }
 
+  .tag-editor {
+    flex: 1 1 100%;
+    background: #2a2a32;
+    border-radius: 6px;
+    padding: 8px;
+    margin-top: 4px;
+  }
+  .tag-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+  .tag-suggestion {
+    border: none;
+    cursor: pointer;
+  }
+  .tag-suggestion-selected {
+    background: #7fb84a;
+    color: #1e1e24;
+  }
+  .tag-editor-input-row {
+    display: flex;
+    gap: 6px;
+  }
+  .tag-editor-input-row input {
+    flex: 1;
+    min-width: 0;
+  }
+
   .queue-chip {
     display: flex;
     align-items: center;
@@ -420,6 +450,7 @@ const themeFilterSelect = document.getElementById('themeFilterSelect');
 const themeRecommendBar = document.getElementById('themeRecommendBar');
 const findThemeMusicBtn = document.getElementById('findThemeMusicBtn');
 let themeFilter = 'all';
+let openTagEditorTrackId = null; // which track's tag editor popup is open, if any
 const waveform = document.getElementById('waveform');
 const waveformWrap = document.getElementById('waveformWrap');
 const waveformHint = document.getElementById('waveformHint');
@@ -788,6 +819,61 @@ function getAllThemes() {
   return [...set].sort();
 }
 
+// Builds the tag editor popup: every theme used anywhere in the library
+// shown as a clickable chip (click to toggle it on/off this track), plus a
+// text box for typing a brand-new one — so tagging a track usually needs
+// no typing at all once you've got a few themes going.
+function buildTagEditor(track) {
+  const editor = document.createElement('div');
+  editor.className = 'tag-editor';
+
+  const suggestions = document.createElement('div');
+  suggestions.className = 'tag-suggestions';
+  const allThemes = getAllThemes();
+  if (allThemes.length === 0) {
+    const hint = document.createElement('span');
+    hint.className = 'hint';
+    hint.textContent = 'No tags yet — add one below.';
+    suggestions.appendChild(hint);
+  }
+  allThemes.forEach(theme => {
+    const selected = (track.themes || []).includes(theme);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'theme-pill tag-suggestion' + (selected ? ' tag-suggestion-selected' : '');
+    chip.textContent = theme;
+    chip.addEventListener('click', () => {
+      track.themes = selected
+        ? track.themes.filter(t => t !== theme)
+        : [...(track.themes || []), theme];
+      renderTrackList();
+    });
+    suggestions.appendChild(chip);
+  });
+  editor.appendChild(suggestions);
+
+  const addRow = document.createElement('div');
+  addRow.className = 'tag-editor-input-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'New tag…';
+  const addBtn = document.createElement('button');
+  addBtn.textContent = '+ Add';
+  function addTypedTag() {
+    const theme = input.value.trim().toLowerCase();
+    if (!theme || (track.themes || []).includes(theme)) return;
+    track.themes = [...(track.themes || []), theme];
+    renderTrackList();
+  }
+  addBtn.addEventListener('click', addTypedTag);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') addTypedTag(); });
+  addRow.appendChild(input);
+  addRow.appendChild(addBtn);
+  editor.appendChild(addRow);
+
+  return editor;
+}
+
 function updateThemeRecommendBar() {
   if (themeFilter === 'all') {
     themeRecommendBar.style.display = 'none';
@@ -877,13 +963,14 @@ function renderTrackList() {
     tagBtn.textContent = '🏷️';
     tagBtn.title = 'Tag this track with themes (e.g. battle, night, tavern)';
     tagBtn.addEventListener('click', () => {
-      const current = (track.themes || []).join(', ');
-      const input = window.prompt('Themes for this track, comma-separated:', current);
-      if (input === null) return; // cancelled
-      track.themes = input.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      openTagEditorTrackId = openTagEditorTrackId === track.id ? null : track.id;
       renderTrackList();
     });
     row.appendChild(tagBtn);
+
+    if (openTagEditorTrackId === track.id) {
+      row.appendChild(buildTagEditor(track));
+    }
 
     const queueBtn = document.createElement('button');
     queueBtn.textContent = '+ Queue';
@@ -897,7 +984,17 @@ function renderTrackList() {
     const switchBtn = document.createElement('button');
     switchBtn.textContent = track.id === currentTrackId ? 'Current' : 'Play now';
     switchBtn.disabled = track.id === currentTrackId;
-    switchBtn.addEventListener('click', () => switchToTrack(track.id));
+    switchBtn.addEventListener('click', () => {
+      switchToTrack(track.id);
+      // Spotify tracks already start playing as soon as switchToTrack's
+      // own API call succeeds; a local file just loads a new <audio> src
+      // and needs an explicit play() to actually start.
+      if (track.type !== 'spotify') {
+        setupVisualizer();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        playerPlay();
+      }
+    });
     row.appendChild(switchBtn);
 
     const removeBtn = document.createElement('button');
@@ -2002,13 +2099,20 @@ playerEvents.addEventListener('timeupdate', () => {
   const track = getCurrentTrack();
   const sections = getSections();
   const current = sections[activeSectionIndex];
-  if (current && t >= current.end - 0.05) {
+  // Spotify's position only updates once per 250ms poll (an HTML5 <audio>
+  // element's timeupdate fires far more often), so a small margin can get
+  // skipped over between two polls — and once playback actually reaches
+  // the real end of a Spotify track with nothing queued next, the device
+  // pauses itself, so looping back also needs an explicit resume.
+  const margin = isSpotifyTrack(track) ? 0.3 : 0.05;
+  if (current && t >= current.end - margin) {
     if (track && track.stopSections[activeSectionIndex]) {
       playerPause();
       const label = track.sectionNames[activeSectionIndex] || `Section ${activeSectionIndex + 1}`;
       statusLine.textContent = `Stopped: ${label} — click Next Section to continue.`;
     } else {
       playerSeek(current.start);
+      if (isSpotifyTrack(track) && spotifyPlayerInstance) spotifyPlayerInstance.resume();
     }
   }
 });
