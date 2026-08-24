@@ -203,12 +203,25 @@
     flex: 1 1 100%;
   }
   .theme-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     background: #444450;
     color: #c8c8d0;
     border-radius: 999px;
-    padding: 2px 8px;
+    padding: 2px 4px 2px 8px;
     font-size: 0.72rem;
   }
+  .theme-pill-remove {
+    background: none;
+    border: none;
+    color: #c8c8d0;
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .theme-pill-remove:hover { color: #fff; }
 
   .queue-chip {
     display: flex;
@@ -843,7 +856,18 @@ function renderTrackList() {
       track.themes.forEach(theme => {
         const pill = document.createElement('span');
         pill.className = 'theme-pill';
-        pill.textContent = theme;
+        const label = document.createElement('span');
+        label.textContent = theme;
+        pill.appendChild(label);
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'theme-pill-remove';
+        removeBtn.textContent = '×';
+        removeBtn.title = `Remove "${theme}"`;
+        removeBtn.addEventListener('click', () => {
+          track.themes = track.themes.filter(t => t !== theme);
+          renderTrackList();
+        });
+        pill.appendChild(removeBtn);
         pills.appendChild(pill);
       });
       row.appendChild(pills);
@@ -1362,16 +1386,29 @@ importUrl.addEventListener('keydown', (e) => {
 });
 
 audio.addEventListener('loadedmetadata', () => {
-  seekBar.max = audio.duration;
-  durationLabel.textContent = formatTime(audio.duration);
-  const track = getCurrentTrack();
-  if (track) track.duration = audio.duration;
-
   if (pendingSectionIndex !== null) {
     const idx = pendingSectionIndex;
     pendingSectionIndex = null;
     goToSection(idx);
   } else {
+    renderSections();
+  }
+});
+
+// Browsers often only have an *estimate* of an MP3's duration at
+// loadedmetadata time (guessed from the bitrate of the first frame,
+// since our yt-dlp downloads don't always carry an accurate VBR header) and
+// correct it later once the real length is known. Without re-syncing here,
+// the waveform and section boundaries would stay stretched or squished
+// relative to actual playback using that first wrong number forever — it
+// gets saved into the library as-is.
+audio.addEventListener('durationchange', () => {
+  if (!isFinite(audio.duration) || audio.duration <= 0) return;
+  seekBar.max = audio.duration;
+  durationLabel.textContent = formatTime(audio.duration);
+  const track = getCurrentTrack();
+  if (track && track.duration !== audio.duration) {
+    track.duration = audio.duration;
     renderSections();
   }
 });
@@ -1434,6 +1471,45 @@ zoomInBtn.addEventListener('click', () => setWaveformZoom(waveformZoom * 2));
 zoomOutBtn.addEventListener('click', () => setWaveformZoom(waveformZoom / 2));
 zoomResetBtn.addEventListener('click', () => setWaveformZoom(1));
 
+// Trackpad pinch gestures arrive in the browser as wheel events with
+// ctrlKey set (that's true even though no one is actually holding Ctrl —
+// it's how macOS/Chrome/Firefox all report a pinch), deltaY negative for
+// pinch-out (zoom in) and positive for pinch-in (zoom out).
+waveformWrap.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const track = getCurrentTrack();
+  const duration = track && (track.duration || playerGetDuration());
+  // Keep whatever time is currently centered in view still centered after
+  // the zoom changes — otherwise the view jumps to a jarring, arbitrary spot.
+  const centerTime = duration
+    ? ((waveformWrap.scrollLeft + waveformWrap.clientWidth / 2) / waveform.width) * duration
+    : null;
+  setWaveformZoom(waveformZoom * Math.exp(-e.deltaY * 0.02));
+  if (centerTime != null) {
+    const centerPx = (centerTime / duration) * waveform.width;
+    waveformWrap.scrollLeft = Math.max(0, centerPx - waveformWrap.clientWidth / 2);
+  }
+}, { passive: false });
+
+// One bar per pixel is all a display can show distinctly — pick the
+// loudest sample per pixel column so we don't lose visible peaks. This is
+// only for drawing: the full-resolution peaks array (and any timestamps
+// derived from it) is untouched, so precision at higher zoom is unaffected.
+function downsamplePeaks(peaks, targetCount) {
+  if (peaks.length <= targetCount) return peaks;
+  const bucketSize = peaks.length / targetCount;
+  const out = new Array(targetCount);
+  for (let i = 0; i < targetCount; i++) {
+    const start = Math.floor(i * bucketSize);
+    const end = Math.max(start + 1, Math.floor((i + 1) * bucketSize));
+    let max = 0;
+    for (let j = start; j < end; j++) if (peaks[j] > max) max = peaks[j];
+    out[i] = max;
+  }
+  return out;
+}
+
 function drawWaveform() {
   const width = Math.max(1, Math.round(waveformWrap.clientWidth * waveformZoom));
   waveform.width = width;
@@ -1445,7 +1521,14 @@ function drawWaveform() {
   const track = getCurrentTrack();
   if (!track || !track.peaks) return;
 
-  const peaks = track.peaks;
+  // The server generates a high-resolution peaks array (enough detail to
+  // zoom in far for precise cuts), but drawing more bars than the canvas
+  // has pixels for is wasted work — at the default zoom that's ~20-30x
+  // more fillRect calls than can even show up distinctly. Downsample to
+  // one bar per pixel for the draw; zooming in widens the canvas until it
+  // exceeds the peaks array's length, at which point every peak gets its
+  // own bar again — the same full precision as before.
+  const peaks = downsamplePeaks(track.peaks, w);
   const barWidth = w / peaks.length;
   waveformCtx.fillStyle = '#4a4a6a';
   for (let i = 0; i < peaks.length; i++) {
