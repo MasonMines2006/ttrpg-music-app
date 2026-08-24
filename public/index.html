@@ -373,6 +373,7 @@
   <div class="card">
     <div class="transport no-margin">
       <span class="hint" id="spotifyStatus" style="flex:1;">Not connected to Spotify.</span>
+      <button id="myPlaylistsBtn">📃 My Playlists</button>
       <button id="spotifyConnectBtn">Connect Spotify</button>
     </div>
   </div>
@@ -463,6 +464,7 @@ const MAX_WAVEFORM_ZOOM = 128;
 const sourceSpotify = document.getElementById('sourceSpotify');
 const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
 const spotifyStatus = document.getElementById('spotifyStatus');
+const myPlaylistsBtn = document.getElementById('myPlaylistsBtn');
 
 let searchSource = 'youtube';
 sourceYoutube.addEventListener('click', () => setSource('youtube'));
@@ -1461,6 +1463,70 @@ async function importSpotifyPlaylist(playlistId) {
     importStatus.classList.add('error');
   }
 }
+
+function renderPlaylistRow(playlist) {
+  const row = document.createElement('div');
+  row.className = 'result-row';
+  const images = playlist.images;
+  const image = Array.isArray(images) && images.length ? images[images.length - 1].url : null;
+  row.appendChild(createThumb(image));
+
+  const info = document.createElement('div');
+  info.className = 'info';
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = playlist.name;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = `${playlist.tracks.total} track(s)`;
+  info.appendChild(title);
+  info.appendChild(meta);
+
+  const viewBtn = document.createElement('button');
+  viewBtn.textContent = 'View tracks';
+  viewBtn.addEventListener('click', () => importSpotifyPlaylist(playlist.id));
+
+  row.appendChild(info);
+  row.appendChild(viewBtn);
+  return row;
+}
+
+// Lists the logged-in user's own playlists so they can be browsed and
+// imported by clicking, instead of having to go find and paste each one's
+// share link into the search box.
+async function browseMyPlaylists() {
+  if (!isSpotifyConnected()) {
+    importStatus.textContent = 'Connect your Spotify account first.';
+    importStatus.classList.add('error');
+    return;
+  }
+  resultList.innerHTML = '';
+  importStatus.classList.remove('error');
+  importStatus.textContent = 'Loading your playlists…';
+
+  try {
+    const token = await getValidSpotifyToken();
+    let playlists = [];
+    let url = 'https://api.spotify.com/v1/me/playlists?limit=50';
+    while (url) {
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data.error && data.error.message) || 'Could not load your playlists.');
+      playlists = playlists.concat(data.items);
+      url = data.next; // Spotify paginates this list too, in pages of up to 50
+    }
+    if (!playlists.length) {
+      importStatus.textContent = "You don't have any playlists.";
+      return;
+    }
+    importStatus.textContent = `Found ${playlists.length} playlist(s) — click one to see its tracks.`;
+    playlists.forEach(p => resultList.appendChild(renderPlaylistRow(p)));
+  } catch (err) {
+    importStatus.textContent = err.message;
+    importStatus.classList.add('error');
+  }
+}
+myPlaylistsBtn.addEventListener('click', browseMyPlaylists);
 
 importBtn.addEventListener('click', () => {
   const text = importUrl.value.trim();
