@@ -630,6 +630,7 @@ function isSpotifyTrack(track) {
   return !!track && track.type === 'spotify';
 }
 function playerPlay() {
+  stopPreview(); // never let a search-result preview keep playing alongside the main track
   const track = getCurrentTrack();
   if (isSpotifyTrack(track)) {
     // A track restored from a saved library was never actually handed to
@@ -688,6 +689,7 @@ function switchToTrack(id, jumpToSectionIndex = null) {
   const track = tracks.find(t => t.id === id);
   if (!track) return;
 
+  stopPreview();
   // Stop whichever backend was previously active so two tracks can't play at once.
   audio.pause();
   stopSpotifyPolling();
@@ -936,11 +938,17 @@ function renderSections() {
       renderQueue();
     });
 
+    const zoomBtn = document.createElement('button');
+    zoomBtn.textContent = '🔍 Zoom';
+    zoomBtn.title = 'Zoom the waveform in on just this section, for precise cuts';
+    zoomBtn.addEventListener('click', () => zoomToSection(i));
+
     row.appendChild(nameInput);
     row.appendChild(range);
     row.appendChild(jumpBtn);
     row.appendChild(stopToggleBtn);
     row.appendChild(queueBtn);
+    row.appendChild(zoomBtn);
 
     // Only real markers (not the track start) can be removed.
     if (i > 0) {
@@ -1070,8 +1078,7 @@ function hideLoading() {
 }
 
 async function downloadFromUrl(url, fallbackImage = null) {
-  previewAudio.pause();
-  resetPreviewButton();
+  stopPreview();
   importBtn.disabled = true;
   resultList.innerHTML = '';
   importStatus.classList.remove('error');
@@ -1107,6 +1114,10 @@ function resetPreviewButton() {
   if (activePreviewBtn) activePreviewBtn.textContent = '▶ Preview';
   activePreviewBtn = null;
 }
+function stopPreview() {
+  previewAudio.pause();
+  resetPreviewButton();
+}
 previewAudio.addEventListener('ended', resetPreviewButton);
 
 // Plays a short (~20s) clip fetched fresh from the server, so you can
@@ -1114,8 +1125,7 @@ previewAudio.addEventListener('ended', resetPreviewButton);
 async function togglePreview(url, btn) {
   // Clicking the currently-playing preview's button again just stops it.
   if (activePreviewBtn === btn) {
-    previewAudio.pause();
-    resetPreviewButton();
+    stopPreview();
     return;
   }
 
@@ -1148,8 +1158,7 @@ async function togglePreview(url, btn) {
 }
 
 async function runSearch(query) {
-  previewAudio.pause();
-  resetPreviewButton();
+  stopPreview();
   importBtn.disabled = true;
   resultList.innerHTML = '';
   importStatus.classList.remove('error');
@@ -1405,6 +1414,22 @@ function setWaveformZoom(newZoom) {
   zoomLabel.textContent = `${waveformZoom}×`;
   drawWaveform();
 }
+
+// Zooms in just far enough to fill the view with one section (plus a
+// little breathing room) and scrolls so it starts near the left edge —
+// the fast path to precise cuts instead of manually zooming + panning.
+function zoomToSection(index) {
+  const track = getCurrentTrack();
+  const sections = getSections();
+  const sec = sections[index];
+  const duration = track && (track.duration || playerGetDuration());
+  if (!track || !sec || !duration) return;
+  const sectionLength = Math.max(0.05, sec.end - sec.start);
+  setWaveformZoom((duration / sectionLength) * 0.9);
+  const startPx = (sec.start / duration) * waveform.width;
+  waveformWrap.scrollLeft = Math.max(0, startPx - 20);
+}
+
 zoomInBtn.addEventListener('click', () => setWaveformZoom(waveformZoom * 2));
 zoomOutBtn.addEventListener('click', () => setWaveformZoom(waveformZoom / 2));
 zoomResetBtn.addEventListener('click', () => setWaveformZoom(1));
@@ -1492,13 +1517,80 @@ function seekToTime(time) {
   playerSeek(time);
 }
 
+let suppressNextWaveformClick = false;
 waveform.addEventListener('click', (e) => {
+  if (suppressNextWaveformClick) { suppressNextWaveformClick = false; return; }
   const track = getCurrentTrack();
   const duration = track && (track.duration || playerGetDuration());
   if (!duration) return;
   const rect = waveform.getBoundingClientRect();
   const ratio = (e.clientX - rect.left) / rect.width;
   seekToTime(ratio * duration);
+});
+
+// ----- Marker dragging (drag a split line directly for precise cuts) -----
+const MARKER_HIT_PX = 8; // how close a click needs to be to a marker line to grab it
+
+function findMarkerNear(track, clickX, rectWidth, duration) {
+  let closestIdx = null, closestDist = Infinity;
+  track.markers.forEach((m, idx) => {
+    const dist = Math.abs((m / duration) * rectWidth - clickX);
+    if (dist < closestDist) { closestDist = dist; closestIdx = idx; }
+  });
+  return closestDist <= MARKER_HIT_PX ? closestIdx : null;
+}
+
+// A marker can't be dragged past its neighbors — that would silently
+// reorder sections, which would desync sectionNames/stopSections/the
+// queue (all keyed by section *index*, not by which marker made it).
+function getMarkerDragBounds(track, markerValue, duration, minGap = 0.1) {
+  const others = track.markers.filter(m => m !== markerValue).sort((a, b) => a - b);
+  let lower = 0, upper = duration;
+  for (const m of others) {
+    if (m < markerValue) lower = m;
+    else { upper = m; break; }
+  }
+  return { lower: lower + minGap, upper: upper - minGap };
+}
+
+let draggingMarker = null;
+
+waveform.addEventListener('mousedown', (e) => {
+  const track = getCurrentTrack();
+  const duration = track && (track.duration || playerGetDuration());
+  if (!track || !duration) return;
+  const rect = waveform.getBoundingClientRect();
+  const idx = findMarkerNear(track, e.clientX - rect.left, rect.width, duration);
+  if (idx === null) return;
+  draggingMarker = { track, idx, duration, bounds: getMarkerDragBounds(track, track.markers[idx], duration) };
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!draggingMarker) return;
+  const { track, idx, bounds, duration } = draggingMarker;
+  const rect = waveform.getBoundingClientRect();
+  const t = Math.min(bounds.upper, Math.max(bounds.lower, ((e.clientX - rect.left) / rect.width) * duration));
+  track.markers[idx] = t;
+  drawWaveform();
+});
+
+document.addEventListener('mouseup', () => {
+  if (!draggingMarker) return;
+  draggingMarker = null;
+  suppressNextWaveformClick = true; // dropping a marker shouldn't also seek playback there
+  renderSections();
+});
+
+// Hover feedback so it's discoverable that marker lines can be dragged.
+waveform.addEventListener('mousemove', (e) => {
+  if (draggingMarker) return;
+  const track = getCurrentTrack();
+  const duration = track && (track.duration || playerGetDuration());
+  if (!track || !duration) return;
+  const rect = waveform.getBoundingClientRect();
+  const idx = findMarkerNear(track, e.clientX - rect.left, rect.width, duration);
+  waveform.style.cursor = idx !== null ? 'ew-resize' : 'pointer';
 });
 
 // ----- Audio visualizer (the frequency "spike bars") -----
