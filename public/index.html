@@ -172,6 +172,10 @@
     gap: 8px;
     min-width: 0;
   }
+  .source-icon {
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
   .track-row .track-name {
     flex: 1;
     min-width: 0;
@@ -451,6 +455,8 @@ const themeFilterSelect = document.getElementById('themeFilterSelect');
 const themeRecommendBar = document.getElementById('themeRecommendBar');
 const findThemeMusicBtn = document.getElementById('findThemeMusicBtn');
 let themeFilter = 'all';
+const SOURCE_ICONS = { youtube: '▶️', soundcloud: '☁️', spotify: '🟢', upload: '💾' };
+const SOURCE_LABELS = { youtube: 'From YouTube', soundcloud: 'From SoundCloud', spotify: 'From Spotify', upload: 'Uploaded file' };
 let openTagEditorTrackId = null; // which track's tag editor popup is open, if any
 const waveform = document.getElementById('waveform');
 const waveformWrap = document.getElementById('waveformWrap');
@@ -623,13 +629,14 @@ function restoreTrackSelection(id) {
 // Adding a track only switches playback to it when it's the very first
 // one — otherwise it just joins the library so you can queue it up
 // without interrupting whatever's already playing.
-function addTrackToLibrary(src, name, image = null) {
+function addTrackToLibrary(src, name, image = null, source = 'upload') {
   const track = {
     id: crypto.randomUUID(),
     type: 'file',
     name,
     src,
     image,
+    source,
     // Auto-tag with whatever theme is currently being browsed, so finding
     // and adding recommendations for "battle" music files them under
     // "battle" without an extra manual step.
@@ -652,6 +659,7 @@ function addSpotifyTrackToLibrary(uri, name, artist, durationMs, image = null) {
     name: `${name} — ${artist}`,
     spotifyUri: uri,
     image,
+    source: 'spotify',
     themes: themeFilter !== 'all' ? [themeFilter] : [],
     duration: durationMs / 1000,
     markers: [],
@@ -932,6 +940,13 @@ function renderTrackList() {
     const main = document.createElement('div');
     main.className = 'track-main';
     main.appendChild(createThumb(track.image));
+    if (SOURCE_ICONS[track.source]) {
+      const sourceIcon = document.createElement('span');
+      sourceIcon.className = 'source-icon';
+      sourceIcon.textContent = SOURCE_ICONS[track.source];
+      sourceIcon.title = SOURCE_LABELS[track.source];
+      main.appendChild(sourceIcon);
+    }
     const name = document.createElement('span');
     name.className = 'track-name';
     name.textContent = track.name;
@@ -1200,6 +1215,19 @@ function hideLoading() {
   loadingOverlay.classList.add('hidden');
 }
 
+// Purely cosmetic (for the little source icon in the track list) — not a
+// security check, so it doesn't need to match the server's allowlist regex.
+function sourceFromUrl(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, '');
+    if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com') || hostname === 'youtu.be') return 'youtube';
+    if (hostname === 'soundcloud.com' || hostname.endsWith('.soundcloud.com')) return 'soundcloud';
+  } catch {
+    // not a valid URL — fall through to the default below
+  }
+  return 'upload';
+}
+
 async function downloadFromUrl(url, fallbackImage = null) {
   stopPreview();
   importBtn.disabled = true;
@@ -1216,7 +1244,7 @@ async function downloadFromUrl(url, fallbackImage = null) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Download failed.');
 
-    addTrackToLibrary(data.url, data.name, data.image || fallbackImage);
+    addTrackToLibrary(data.url, data.name, data.image || fallbackImage, sourceFromUrl(url));
     importStatus.textContent = `Imported: ${data.name}`;
     importUrl.value = '';
   } catch (err) {
@@ -1413,6 +1441,18 @@ async function addSpotifyTrackById(trackId) {
   }
 }
 
+// A token refreshed from before playlist scopes were added to the app
+// keeps whatever scopes it was originally granted with — refreshing never
+// widens them — so it can still 403 with "Insufficient client scope" even
+// though the app now requests the right permissions. The fix is always
+// the same: log in again so Spotify re-prompts for the current scope list.
+function friendlySpotifyError(err) {
+  if (/insufficient client scope/i.test(err.message)) {
+    return 'Spotify needs permission to see your playlists — click Disconnect, then Connect Spotify again to grant it.';
+  }
+  return err.message;
+}
+
 async function importSpotifyPlaylist(playlistId) {
   if (!isSpotifyConnected()) {
     importStatus.textContent = 'Connect your Spotify account first.';
@@ -1459,7 +1499,7 @@ async function importSpotifyPlaylist(playlistId) {
       ));
     });
   } catch (err) {
-    importStatus.textContent = err.message;
+    importStatus.textContent = friendlySpotifyError(err);
     importStatus.classList.add('error');
   }
 }
@@ -1478,7 +1518,8 @@ function renderPlaylistRow(playlist) {
   title.textContent = playlist.name;
   const meta = document.createElement('div');
   meta.className = 'meta';
-  meta.textContent = `${playlist.tracks.total} track(s)`;
+  const trackCount = playlist.tracks && typeof playlist.tracks.total === 'number' ? playlist.tracks.total : '?';
+  meta.textContent = `${trackCount} track(s)`;
   info.appendChild(title);
   info.appendChild(meta);
 
@@ -1512,7 +1553,9 @@ async function browseMyPlaylists() {
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error((data.error && data.error.message) || 'Could not load your playlists.');
-      playlists = playlists.concat(data.items);
+      // Spotify can return a null entry for a playlist it can't fully
+      // resolve (e.g. one removed since the list was cached) — skip those.
+      playlists = playlists.concat(data.items.filter(Boolean));
       url = data.next; // Spotify paginates this list too, in pages of up to 50
     }
     if (!playlists.length) {
@@ -1522,7 +1565,7 @@ async function browseMyPlaylists() {
     importStatus.textContent = `Found ${playlists.length} playlist(s) — click one to see its tracks.`;
     playlists.forEach(p => resultList.appendChild(renderPlaylistRow(p)));
   } catch (err) {
-    importStatus.textContent = err.message;
+    importStatus.textContent = friendlySpotifyError(err);
     importStatus.classList.add('error');
   }
 }
