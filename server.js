@@ -81,13 +81,17 @@ function pickThumbnail(thumbnails) {
 }
 
 app.post('/api/search', (req, res) => {
-  const { query, source } = req.body || {};
+  const { query, source, count } = req.body || {};
   if (!query || typeof query !== 'string' || !query.trim()) {
     return res.status(400).json({ error: 'Please enter something to search for.' });
   }
 
+  // yt-dlp's search prefixes have no offset — "next 5 results" is done by
+  // asking for a bigger total each time and having the client slice off
+  // only the new tail. Clamp so a client can't force an enormous scrape.
+  const resultCount = Number.isInteger(count) && count > 0 ? Math.min(count, 50) : 5;
   // ytsearchN:/scsearchN: are yt-dlp's built-in search prefixes — no API key needed.
-  const prefix = source === 'soundcloud' ? 'scsearch5' : 'ytsearch5';
+  const prefix = source === 'soundcloud' ? `scsearch${resultCount}` : `ytsearch${resultCount}`;
 
   execFile('yt-dlp', [
     '--flat-playlist',

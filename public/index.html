@@ -1308,25 +1308,90 @@ async function togglePreview(url, btn) {
   }
 }
 
+const SEARCH_PAGE_SIZE = 5;
+let searchResultCount = SEARCH_PAGE_SIZE;
+let lastSearchQuery = '';
+let lastSearchSource = null;
+
+function renderSearchResultRow(result) {
+  const row = document.createElement('div');
+  row.className = 'result-row';
+  row.appendChild(createThumb(result.image));
+
+  const info = document.createElement('div');
+  info.className = 'info';
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = result.title;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = [result.uploader, formatDuration(result.duration)].filter(Boolean).join(' · ');
+  info.appendChild(title);
+  info.appendChild(meta);
+
+  const previewBtn = document.createElement('button');
+  previewBtn.textContent = '▶ Preview';
+  previewBtn.addEventListener('click', () => togglePreview(result.url, previewBtn));
+
+  const useBtn = document.createElement('button');
+  useBtn.textContent = 'Download';
+  useBtn.addEventListener('click', () => downloadFromUrl(result.url, result.image));
+
+  row.appendChild(info);
+  row.appendChild(previewBtn);
+  row.appendChild(useBtn);
+  return row;
+}
+
+// Shared by both search backends so there's only ever one "Show 5 more"
+// button in the list at a time, always at the bottom.
+function renderLoadMoreButton(onClick) {
+  const existing = resultList.querySelector('.load-more-btn');
+  if (existing) existing.remove();
+  const btn = document.createElement('button');
+  btn.className = 'primary load-more-btn';
+  btn.textContent = `Show ${SEARCH_PAGE_SIZE} more results`;
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    btn.textContent = 'Loading…';
+    onClick();
+  });
+  resultList.appendChild(btn);
+}
+
 async function runSearch(query) {
   stopPreview();
   importBtn.disabled = true;
   resultList.innerHTML = '';
   importStatus.classList.remove('error');
+  searchResultCount = SEARCH_PAGE_SIZE;
+  lastSearchQuery = query;
+  lastSearchSource = searchSource;
 
   if (searchSource === 'spotify') {
-    await runSpotifySearch(query);
+    await runSpotifySearch(query, 0, false);
     importBtn.disabled = false;
     return;
   }
 
-  importStatus.textContent = 'Searching…';
+  await fetchYtDlpResults(false);
+  importBtn.disabled = false;
+}
+
+// yt-dlp's ytsearchN:/scsearchN: prefixes have no offset — "load more" is
+// done by re-searching for a bigger total each time and slicing off only
+// the newly-added tail, since the same query returns a stable top-N order.
+async function fetchYtDlpResults(isMore) {
+  const existingLoadMore = resultList.querySelector('.load-more-btn');
+  if (existingLoadMore) existingLoadMore.remove();
+  importStatus.classList.remove('error');
+  importStatus.textContent = isMore ? 'Loading more…' : 'Searching…';
 
   try {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, source: searchSource })
+      body: JSON.stringify({ query: lastSearchQuery, source: lastSearchSource, count: searchResultCount })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Search failed.');
@@ -1335,41 +1400,28 @@ async function runSearch(query) {
       importStatus.textContent = 'No results found.';
       return;
     }
+
+    const newResults = isMore ? data.results.slice(searchResultCount - SEARCH_PAGE_SIZE) : data.results;
+    newResults.forEach(result => resultList.appendChild(renderSearchResultRow(result)));
     importStatus.textContent = `Found ${data.results.length} result(s) — click one to download it.`;
-    data.results.forEach(result => {
-      const row = document.createElement('div');
-      row.className = 'result-row';
-      row.appendChild(createThumb(result.image));
 
-      const info = document.createElement('div');
-      info.className = 'info';
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = result.title;
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = [result.uploader, formatDuration(result.duration)].filter(Boolean).join(' · ');
-      info.appendChild(title);
-      info.appendChild(meta);
-
-      const previewBtn = document.createElement('button');
-      previewBtn.textContent = '▶ Preview';
-      previewBtn.addEventListener('click', () => togglePreview(result.url, previewBtn));
-
-      const useBtn = document.createElement('button');
-      useBtn.textContent = 'Download';
-      useBtn.addEventListener('click', () => downloadFromUrl(result.url, result.image));
-
-      row.appendChild(info);
-      row.appendChild(previewBtn);
-      row.appendChild(useBtn);
-      resultList.appendChild(row);
-    });
+    // Fewer results than requested means yt-dlp ran out of matches.
+    if (data.results.length === searchResultCount) {
+      renderLoadMoreButton(() => {
+        searchResultCount += SEARCH_PAGE_SIZE;
+        fetchYtDlpResults(true);
+      });
+    }
   } catch (err) {
     importStatus.textContent = err.message;
     importStatus.classList.add('error');
-  } finally {
-    importBtn.disabled = false;
+    if (isMore) {
+      searchResultCount -= SEARCH_PAGE_SIZE;
+      renderLoadMoreButton(() => {
+        searchResultCount += SEARCH_PAGE_SIZE;
+        fetchYtDlpResults(true);
+      });
+    }
   }
 }
 
@@ -2177,16 +2229,20 @@ function stopSpotifyPolling() {
   spotifyPollHandle = null;
 }
 
-async function runSpotifySearch(query) {
+async function runSpotifySearch(query, offset = 0, isMore = false) {
   if (!isSpotifyConnected()) {
     importStatus.textContent = 'Connect your Spotify account first.';
     importStatus.classList.add('error');
     return;
   }
-  importStatus.textContent = 'Searching Spotify…';
+  const existingLoadMore = resultList.querySelector('.load-more-btn');
+  if (existingLoadMore) existingLoadMore.remove();
+  importStatus.classList.remove('error');
+  importStatus.textContent = isMore ? 'Loading more…' : 'Searching Spotify…';
+
   try {
     const token = await getValidSpotifyToken();
-    const res = await fetch(`https://api.spotify.com/v1/search?type=track&limit=8&q=${encodeURIComponent(query)}`, {
+    const res = await fetch(`https://api.spotify.com/v1/search?type=track&limit=${SEARCH_PAGE_SIZE}&offset=${offset}&q=${encodeURIComponent(query)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await res.json();
@@ -2197,15 +2253,21 @@ async function runSpotifySearch(query) {
       importStatus.textContent = 'No results found.';
       return;
     }
-    importStatus.textContent = `Found ${items.length} result(s) — click one to add it.`;
+    importStatus.textContent = `Found ${data.tracks.total} result(s) — click one to add it.`;
     items.forEach(item => {
       resultList.appendChild(renderSpotifyItemRow(item, (i, artists) =>
         addSpotifyTrackToLibrary(i.uri, i.name, artists, i.duration_ms, spotifyImageFor(i))
       ));
     });
+
+    // Spotify tells us directly whether there's a further page, via `next`.
+    if (data.tracks.next) {
+      renderLoadMoreButton(() => runSpotifySearch(query, offset + SEARCH_PAGE_SIZE, true));
+    }
   } catch (err) {
     importStatus.textContent = err.message;
     importStatus.classList.add('error');
+    if (isMore) renderLoadMoreButton(() => runSpotifySearch(query, offset, true));
   }
 }
 
