@@ -1446,22 +1446,33 @@ async function addSpotifyTrackById(trackId) {
 // widens them — so it can still 403 with "Insufficient client scope" even
 // though the app now requests the right permissions. The fix is always
 // the same: log in again so Spotify re-prompts for the current scope list.
+// err.status/err.spotifyReason are attached by spotifyApiGet below — shown
+// in brackets so the real cause is visible without opening dev tools.
 function friendlySpotifyError(err) {
+  const detail = err.status ? ` [Spotify said: ${err.status} ${err.message}${err.spotifyReason ? ' / ' + err.spotifyReason : ''}]` : '';
   if (/insufficient client scope/i.test(err.message)) {
-    return 'Spotify needs permission to see your playlists — click Disconnect, then Connect Spotify again to grant it.';
+    return 'Spotify needs permission to see your playlists — click Disconnect, then Connect Spotify again to grant it.' + detail;
   }
-  // A bare "Forbidden" (as opposed to the scope error above) usually means
-  // the access token still doesn't actually carry playlist scope — Spotify
-  // skips its consent screen for anyone who authorized this app before, so
-  // a plain reconnect used to silently keep the old, narrower grant. That's
-  // now forced to re-prompt (see show_dialog in redirectToSpotifyLogin), so
-  // disconnecting and reconnecting once more should grant it for real. The
-  // other cause is one of Spotify's own curated playlists, which block API
-  // access to their tracks no matter what scope you have.
   if (/^forbidden$/i.test(err.message)) {
-    return "Spotify blocked access to this playlist's tracks. Click Disconnect, then Connect Spotify again and accept the permissions screen — a previous reconnect may not have actually granted playlist access. If it still fails on your own playlists afterward, it's likely one of Spotify's curated playlists (Discover Weekly, Daily Mix, etc.), which block API access to their tracks entirely.";
+    return "Spotify blocked access to this playlist's tracks. Click Disconnect, then Connect Spotify again and accept the permissions screen — a previous reconnect may not have actually granted playlist access. If it still fails on your own playlists afterward, it's likely one of Spotify's curated playlists (Discover Weekly, Daily Mix, etc.), which block API access to their tracks entirely." + detail;
   }
-  return err.message;
+  return err.message + detail;
+}
+
+// Shared helper for reading a Spotify Web API GET response: throws with the
+// HTTP status and Spotify's own "reason" code (e.g. PREMIUM_REQUIRED) still
+// attached to the error, instead of discarding everything but the message.
+async function spotifyApiGet(url, token) {
+  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error('Spotify API error', res.status, url, data);
+    const err = new Error((data.error && data.error.message) || res.statusText || 'Spotify request failed.');
+    err.status = res.status;
+    if (data.error && data.error.reason) err.spotifyReason = data.error.reason;
+    throw err;
+  }
+  return data;
 }
 
 async function importSpotifyPlaylist(playlistId) {
@@ -1479,9 +1490,7 @@ async function importSpotifyPlaylist(playlistId) {
     let items = [];
     let url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`;
     while (url) {
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data.error && data.error.message) || 'Could not load this playlist.');
+      const data = await spotifyApiGet(url, token);
       items = items.concat(data.items.filter(i => i.track).map(i => i.track));
       url = data.next; // Spotify paginates playlist tracks in pages of up to 100
     }
@@ -1578,9 +1587,7 @@ async function browseMyPlaylists() {
     let playlists = [];
     let url = 'https://api.spotify.com/v1/me/playlists?limit=50';
     while (url) {
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data.error && data.error.message) || 'Could not load your playlists.');
+      const data = await spotifyApiGet(url, token);
       // Spotify can return a null entry for a playlist it can't fully
       // resolve (e.g. one removed since the list was cached) — skip those.
       playlists = playlists.concat(data.items.filter(Boolean));
