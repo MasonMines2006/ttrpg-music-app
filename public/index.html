@@ -1450,11 +1450,16 @@ function friendlySpotifyError(err) {
   if (/insufficient client scope/i.test(err.message)) {
     return 'Spotify needs permission to see your playlists — click Disconnect, then Connect Spotify again to grant it.';
   }
-  // A bare "Forbidden" (as opposed to the scope error above) almost always
-  // means the playlist itself is off-limits — most commonly one of
-  // Spotify's own curated playlists, which block API access to their tracks.
+  // A bare "Forbidden" (as opposed to the scope error above) usually means
+  // the access token still doesn't actually carry playlist scope — Spotify
+  // skips its consent screen for anyone who authorized this app before, so
+  // a plain reconnect used to silently keep the old, narrower grant. That's
+  // now forced to re-prompt (see show_dialog in redirectToSpotifyLogin), so
+  // disconnecting and reconnecting once more should grant it for real. The
+  // other cause is one of Spotify's own curated playlists, which block API
+  // access to their tracks no matter what scope you have.
   if (/^forbidden$/i.test(err.message)) {
-    return "Spotify blocked access to this playlist's tracks — this usually happens with Spotify's own curated playlists (Discover Weekly, Daily Mix, etc.). Try one of your own playlists instead.";
+    return "Spotify blocked access to this playlist's tracks. Click Disconnect, then Connect Spotify again and accept the permissions screen — a previous reconnect may not have actually granted playlist access. If it still fails on your own playlists afterward, it's likely one of Spotify's curated playlists (Discover Weekly, Daily Mix, etc.), which block API access to their tracks entirely.";
   }
   return err.message;
 }
@@ -1980,7 +1985,14 @@ async function redirectToSpotifyLogin() {
     redirect_uri: SPOTIFY_REDIRECT_URI,
     scope: SPOTIFY_SCOPES,
     code_challenge_method: 'S256',
-    code_challenge: challenge
+    code_challenge: challenge,
+    // Without this, Spotify silently skips the consent screen for anyone
+    // who has ever authorized this app before, re-issuing a token with
+    // only the scopes granted on that very first login — so someone who
+    // disconnects and reconnects to pick up a newly added scope (like
+    // playlist access) never actually gets it. Forcing the dialog makes
+    // every login show the current scope list and grant it for real.
+    show_dialog: 'true'
   });
   window.location.href = `https://accounts.spotify.com/authorize?${params}`;
 }
