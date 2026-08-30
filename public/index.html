@@ -1481,6 +1481,7 @@ async function importSpotifyPlaylist(playlistId) {
     importStatus.classList.add('error');
     return;
   }
+  if (!requireSpotifyScopes('playlist-read-private', 'playlist-read-collaborative')) return;
   resultList.innerHTML = '';
   importStatus.classList.remove('error');
   importStatus.textContent = 'Loading playlist…';
@@ -2008,6 +2009,29 @@ function storeSpotifyTokens(data) {
   localStorage.setItem('spotify_access_token', data.access_token);
   if (data.refresh_token) localStorage.setItem('spotify_refresh_token', data.refresh_token);
   localStorage.setItem('spotify_expires_at', String(Date.now() + data.expires_in * 1000));
+  // Spotify's token response lists the scopes it actually granted, which
+  // can differ from what we asked for — this is the ground truth for
+  // whether a "Forbidden" is really a missing-scope problem or something
+  // else, instead of guessing from the error message alone.
+  localStorage.setItem('spotify_granted_scope', data.scope || '');
+}
+
+function missingSpotifyScopes() {
+  const granted = (localStorage.getItem('spotify_granted_scope') || '').split(' ').filter(Boolean);
+  return SPOTIFY_SCOPES.split(' ').filter(s => !granted.includes(s));
+}
+
+// Checks scope up front instead of waiting for a 403 — gives a definitive
+// answer ("you're missing X") rather than the ambiguous guesswork a bare
+// "Forbidden" response leaves us with.
+function requireSpotifyScopes(...scopes) {
+  const missing = scopes.filter(s => missingSpotifyScopes().includes(s));
+  if (missing.length) {
+    importStatus.textContent = `Missing Spotify permission(s): ${missing.join(', ')}. Click Disconnect, then Connect Spotify again to grant them.`;
+    importStatus.classList.add('error');
+    return false;
+  }
+  return true;
 }
 
 async function exchangeSpotifyCode(code) {
@@ -2061,6 +2085,7 @@ function disconnectSpotify() {
   localStorage.removeItem('spotify_refresh_token');
   localStorage.removeItem('spotify_expires_at');
   localStorage.removeItem('spotify_verifier');
+  localStorage.removeItem('spotify_granted_scope');
   if (spotifyPlayerInstance) spotifyPlayerInstance.disconnect();
   spotifyPlayerInstance = null;
   spotifyDeviceId = null;
@@ -2069,7 +2094,10 @@ function disconnectSpotify() {
 
 function renderSpotifyStatus() {
   if (isSpotifyConnected()) {
-    spotifyStatus.textContent = 'Connected to Spotify.';
+    const missing = missingSpotifyScopes();
+    spotifyStatus.textContent = missing.length
+      ? `Connected to Spotify, but missing permissions: ${missing.join(', ')}. Disconnect and reconnect to grant them.`
+      : 'Connected to Spotify.';
     spotifyConnectBtn.textContent = 'Disconnect';
   } else {
     spotifyStatus.textContent = 'Not connected to Spotify.';
